@@ -308,7 +308,7 @@ cmd_push() {
 # so it needs no disk space, but it takes about as long as the copy did.
 verify_device() {
   need mtp-getfile "Install it with: brew install libmtp"
-  local zim name found pipe got len tries=0
+  local zim name found pipe reader got len tries=0
   zim="$(local_zim)"
   name="$(basename "$zim")"
   stay_awake
@@ -319,13 +319,18 @@ verify_device() {
   while :; do
     mkfifo "$pipe"
     tee >(shasum -a 256 > "$pipe.sum") < "$pipe" | wc -c > "$pipe.len" &
+    reader=$!
     exec 3> "$pipe" # held open so the checksum only finishes once the transfer has ended
     echo "reading $name ($(human "${found##* }")) back from the e-reader. Keep it plugged in and awake."
     sleep 3
     mtp-getfile "${found%% *}" "$pipe" 2>&1 | mtp_progress || true
     exec 3>&-
-    wait
-    sleep 1 # let the checksum process flush its result
+    # Wait for the reader only: a bare "wait" would also wait for stay_awake, which never exits first.
+    wait "$reader"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do # the checksum process finishes a moment after the reader
+      [ ! -s "$pipe.sum" ] || break
+      sleep 1
+    done
     got="$(awk '{ print $1 }' "$pipe.sum")"
     len="$(tr -d ' ' < "$pipe.len")"
     rm -f "$pipe" "$pipe.sum" "$pipe.len"
