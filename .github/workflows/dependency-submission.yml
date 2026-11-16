@@ -1,0 +1,28 @@
+# Tells GitHub which libraries the Gradle project in reader/ really resolves to. GitHub cannot work
+# that out from the build files alone, and without it Dependabot raises no security alerts for the
+# Android app's dependencies.
+name: Dependency submission
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "reader/**"
+      - ".github/workflows/dependency-submission.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to submit the dependency graph
+
+jobs:
+  gradle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/dependency-submission@v4
+        with:
+          build-root-directory: reader

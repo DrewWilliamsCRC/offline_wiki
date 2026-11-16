@@ -1,0 +1,41 @@
+# Dependabot opens pull requests when newer versions of this project's dependencies are published.
+# It reads this file from the default branch only. Security alerts and security-fix pull requests
+# are switched on separately, in the repository's settings.
+#
+# Nothing here merges by itself, and no CI builds the apps: build and check each pull request
+# locally (see CLAUDE.md) before merging it.
+version: 2
+updates:
+  # The Android app and the index builder: Gradle plugins, libraries and the Gradle wrapper.
+  - package-ecosystem: gradle
+    directory: /reader
+    schedule:
+      interval: weekly
+    assignees:
+      - DrewWilliamsCRC
+    groups:
+      # The Android Gradle Plugin and Kotlin only work in matching versions, so move them together.
+      build-plugins:
+        patterns:
+          - "com.android.*"
+          - "org.jetbrains.kotlin*"
+    ignore:
+      # Pinned on purpose: newer releases' Android packages need a newer compileSdk than this
+      # project builds against. Raise compileSdk first, then remove this rule.
+      - dependency-name: "com.github.luben:zstd-jni"
+
+  # The iOS app's Swift package (zstd).
+  - package-ecosystem: swift
+    directory: /ios
+    schedule:
+      interval: weekly
+    assignees:
+      - DrewWilliamsCRC
+
+  # The actions used by the workflows in .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    assignees:
+      - DrewWilliamsCRC
