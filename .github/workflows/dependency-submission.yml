@@ -1,6 +1,11 @@
 # Tells GitHub which libraries the Gradle project in reader/ really resolves to. GitHub cannot work
 # that out from the build files alone, and without it Dependabot raises no security alerts for the
 # Android app's dependencies.
+#
+# Only the libraries that end up in what we ship are reported: the Android app's release runtime
+# classpath and the JVM modules' runtime classpath. Reporting every configuration also sends the
+# Android Gradle Plugin's own internals (netty, bouncycastle, ...), which run only at build time and
+# drew dozens of alerts that say nothing about the apps.
 name: Dependency submission
 
 on:
@@ -19,10 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/dependency-submission@v6
         with:
           build-root-directory: reader
+          dependency-graph-include-configurations: "releaseRuntimeClasspath|runtimeClasspath"
