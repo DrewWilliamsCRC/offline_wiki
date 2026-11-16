@@ -217,10 +217,16 @@ Things to know:
   `core` depends on it `compileOnly`; the app supplies the `.aar`, the indexer the plain jar.
 - The APK is signed with this Mac's Android debug key and named after its content hash. A build
   signed elsewhere cannot update the installed app.
+- **`main` is protected.** Every change needs a pull request (no approvals required), including
+  from the owner; force-pushes, deletion and merge commits are blocked. Work on a branch, then
+  `gh pr create` and `gh pr merge --rebase --delete-branch`. Wait to be asked before opening or
+  merging one.
 - **Dependabot** (`.github/dependabot.yml`) opens weekly pull requests for Gradle (`reader/`), Swift
   (`ios/`) and GitHub Actions. There is no CI that builds the apps, so build and check each one
   locally before merging; nothing auto-merges. `zstd-jni` is ignored there on purpose (see the pin
   above). `.github/workflows/dependency-submission.yml` reports the Gradle project's resolved
-  dependencies to GitHub, which is what lets Dependabot raise security alerts for them.
+  dependencies to GitHub, which is what lets Dependabot raise security alerts for them. It reports
+  shipped runtime classpaths only; widening that brings back alerts about the build plugin's own
+  libraries (61 of them the first time).
 - **E-ink UI rules**: pure black on white, no animation, ripple or elevation, and labels that must
   fit a fixed width go through `Ui.fitOneLine`. Check layouts at `font_scale` 1.3 as well as 1.0.
