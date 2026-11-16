@@ -77,6 +77,25 @@ final class WikiReaderUITests: XCTestCase {
         shot("08-large-article")
     }
 
+    func testLocationMapsWithoutPicturesAreHidden() throws {
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap()
+        field.typeText("paris")
+        let result = app.staticTexts["Paris"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        result.tap()
+        // The infobox is shown...
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.staticTexts["Country"].waitForExistence(timeout: 20), "the infobox did not load")
+        shot("10-infobox")
+        web.swipeUp()
+        shot("11-infobox-scrolled")
+        // ...but not its location maps, whose pictures "no images" builds leave out, nor their caption.
+        // Without the picture, a map's place-name labels land on top of the rows around it.
+        XCTAssertFalse(web.staticTexts["Location of Paris"].exists, "a location map without its picture is shown")
+    }
+
     func testDarkAppearance() throws {
         // The appearance is read when the app starts, so set it and start again.
         app.terminate()

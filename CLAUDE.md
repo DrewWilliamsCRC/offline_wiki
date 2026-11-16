@@ -194,8 +194,11 @@ Things to know:
 - **"No images" builds come in two shapes.** The full build removes pictures but leaves their frames
   and captions; the "top" build swaps each picture for a transparent placeholder. The stylesheet
   both apps inject (`ReaderScreen.STYLE` on Android, `ArticleServer.style()` on iOS) hides any
-  picture frame without a real picture in it. Check changes to it against both builds; only the
-  small one fits in the Android emulator.
+  picture frame without a real picture in it, and any location map (`.locmap`) without one, whose
+  place-name labels would otherwise land on the rows around it. Check changes to it against both
+  builds; only the small one fits in the Android emulator, and the iOS simulator can use the full
+  one. Rules that hide whole infobox rows must not catch a row holding a nested infobox
+  (`infobox-subbox`), which carries its own data.
 
 ## Conventions and constraints
 
