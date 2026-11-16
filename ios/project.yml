@@ -32,3 +32,21 @@ targets:
         CODE_SIGN_STYLE: Automatic
         # For a real device, pick your team in Xcode (Signing & Capabilities) or pass
         # DEVELOPMENT_TEAM=<id> to xcodebuild. The simulator needs neither.
+    scheme:
+      testTargets:
+        - WikiReaderUITests
+  # Drives the app in the simulator; see the comment at the top of the test file for how to run it.
+  WikiReaderUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - App/UITests
+    dependencies:
+      - target: WikiReader
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.offlinewiki.reader.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: WikiReader
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic

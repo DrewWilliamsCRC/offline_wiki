@@ -24,7 +24,7 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
         self.history = history
         server = ArticleServer(library: library)
         let configuration = WKWebViewConfiguration()
-        configuration.setURLSchemeHandler(server, forURLScheme: WebController.scheme)
+        configuration.setURLSchemeHandler(server, forURLScheme: WikiAddress.scheme)
         // Articles are static HTML; their scripts would only cost time. Our own calls still run.
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -39,7 +39,7 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
         guard !opened else { return }
         opened = true
         server.textSize = textSize
-        webView.load(URLRequest(url: WebController.url(for: path)))
+        webView.load(URLRequest(url: WikiAddress.url(for: path)))
     }
 
     func goBack() { webView.goBack() }
@@ -50,33 +50,19 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
         webView.evaluateJavaScript("document.documentElement.style.webkitTextSizeAdjust='\(percent)%'")
     }
 
-    // MARK: Addresses
-
-    static let scheme = "wiki"
-
-    static func url(for path: String) -> URL {
-        var components = URLComponents()
-        components.scheme = scheme
-        components.host = "offline"
-        components.path = "/" + path
-        return components.url!
-    }
-
-    static func path(of url: URL) -> String { String(url.path.dropFirst()) }
-
     // MARK: WKNavigationDelegate
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
-        guard url.scheme == WebController.scheme else {
+        guard url.scheme == WikiAddress.scheme else {
             // A link out of Wikipedia. It cannot open here; the system browser can try.
             if action.navigationType == .linkActivated { openExternally(url) }
             return .cancel
         }
         // A link may point at a redirect ("USA"). Load the real article so its own links resolve.
-        let path = WebController.path(of: url)
+        let path = WikiAddress.path(of: url)
         if let real = library.resolvePath(path), real != path {
-            var target = URLComponents(url: WebController.url(for: real), resolvingAgainstBaseURL: false)!
+            var target = URLComponents(url: WikiAddress.url(for: real), resolvingAgainstBaseURL: false)!
             target.percentEncodedFragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedFragment
             webView.load(URLRequest(url: target.url!))
             return .cancel
@@ -89,7 +75,7 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
         canGoForward = webView.canGoForward
         title = webView.title
         guard let url = webView.url, let title = webView.title, !title.isEmpty else { return }
-        let path = WebController.path(of: url)
+        let path = WikiAddress.path(of: url)
         if !path.isEmpty, title != ArticleServer.missingTitle, !server.isForwarding(path) {
             history.add(path: path, title: title)
         }
@@ -98,6 +84,22 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
     private func openExternally(_ url: URL) {
         UIApplication.shared.open(url)
     }
+}
+
+/// How articles are addressed inside the web view: `wiki://offline/<path in the ZIM file>`.
+/// Used from the main thread and from the queue that serves requests.
+enum WikiAddress {
+    static let scheme = "wiki"
+
+    static func url(for path: String) -> URL {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = "offline"
+        components.path = "/" + path
+        return components.url!
+    }
+
+    static func path(of url: URL) -> String { String(url.path.dropFirst()) }
 }
 
 /// Answers the web view's requests from the Wikipedia file, off the main thread.
@@ -132,7 +134,7 @@ final class ArticleServer: NSObject {
     fileprivate func end(_ id: ObjectIdentifier) -> Bool { lock.withLock { live.remove(id) != nil } }
 
     fileprivate func answer(_ url: URL, mainFrame: Bool) -> (URLResponse, Data) {
-        let path = WebController.path(of: url)
+        let path = WikiAddress.path(of: url)
         do {
             guard let item = try item(path) else {
                 return mainFrame
@@ -185,8 +187,9 @@ final class ArticleServer: NSObject {
 
     // Wikipedia's own stylesheet does the layout; this adapts it to a phone:
     //  - the chosen text size, and no side margins or navigation clutter;
-    //  - in a "no images" build every picture is a transparent placeholder, so those are dropped
-    //    together with the frames and captions that would surround empty space;
+    //  - "no images" builds either swap each picture for a transparent placeholder or remove it
+    //    and leave its frame and caption behind, so any picture frame without a real picture in
+    //    it is dropped whole;
     //  - a dark appearance that follows the system setting.
     private func style() -> String {
         """
@@ -196,7 +199,7 @@ final class ArticleServer: NSObject {
         .mw-body{padding:0 14px 28px!important}
         .navbox,.navbox-styles,.sistersitebox,.side-box,.mw-editsection,.noprint,.mw-jump-link,.mw-footer,#footer,.ambox,.mw-indicators{display:none!important}
         img[src^="data:image/svg+xml"]{display:none!important}
-        figure:has(img[src^="data:image/svg+xml"]),.thumb:has(img[src^="data:image/svg+xml"]),li.gallerybox:has(img[src^="data:image/svg+xml"]),.infobox-image:has(img[src^="data:image/svg+xml"]){display:none!important}
+        :is(figure,.thumb,.tmulti,li.gallerybox,.infobox-image):not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
         table{max-width:100%!important}
         pre{white-space:pre-wrap!important}
         @media (prefers-color-scheme: dark){
