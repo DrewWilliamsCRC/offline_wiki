@@ -1,66 +1,127 @@
 # Offline Wikipedia for an Android e-reader
 
-English Wikipedia as a single file, read with the free [Kiwix](https://kiwix.org) app. Once the
-file and the app are on the e-reader, nothing needs a network connection.
+All of English Wikipedia on an e-ink reader, with nothing needing a network connection once it is
+copied over. Two pieces:
 
-- **Content:** every English article in full, without images (`nopic`), about 53 GB.
-- **Search:** article titles as you type, plus full-text search across all articles.
-- **Needs:** Android 7.1 or newer, and 53 GB free on the e-reader or its microSD card.
+- **The content:** one `.zim` file published by [Kiwix](https://kiwix.org). The default is the
+  `nopic` build: every article in full, without images, about 53 GB.
+- **Wiki Reader:** a small Android app in [reader/](reader/), written for this purpose. It reads the
+  `.zim` file directly and searches titles through its own compact index, so results appear as you
+  type. Kiwix's own app works with the same file, but its title search is slow on a low-power
+  device (see [Using Kiwix instead](#using-kiwix-instead)).
 
 Everything is driven by `./wiki.sh` (run `./wiki.sh help` for the list).
 
-## 1. Download (on the Mac)
+## What you need on the Mac
+
+```sh
+brew install aria2 libmtp                         # fast downloads; USB file transfer to the e-reader
+brew install --cask temurin android-commandlinetools
+sdkmanager "platforms;android-34" "build-tools;34.0.0"
+```
+
+The last two lines are only for building Wiki Reader. `./wiki.sh serve` additionally needs Docker.
+
+## 1. Download, index, build
 
 ```sh
 ./wiki.sh fetch     # English Wikipedia; resumes if interrupted, verified against Kiwix's checksum
-./wiki.sh apk       # the Kiwix app for Android, verified against the GitHub release checksum
-./wiki.sh status    # what is downloaded so far
+./wiki.sh index     # the title index Wiki Reader searches (under a minute; about 750 MB)
+./wiki.sh app       # the Wiki Reader app
+./wiki.sh status    # what is ready so far
 ```
 
-Downloads land in `data/` (ignored by git). `fetch` is much faster with aria2 installed
-(`brew install aria2`); without it, it falls back to a single slow connection.
+Downloads and build results land in `data/` (ignored by git). The first `index` run also downloads
+Kiwix's 3 GB "top articles" build: it is chosen by page views, and the index uses it to put
+well-known articles first.
 
-To try it before copying anything: `./wiki.sh serve`, then open <http://localhost:8080> (needs Docker).
+## 2. Copy to the e-reader
 
-## 2. Put it on the e-reader
-
-**microSD card** (simplest if the e-reader has a slot; the card must be 64 GB or larger and
-formatted exFAT, which is how cards that size are sold):
+Plug the e-reader in with a USB cable, unlock it, and choose "File transfer" if it asks.
 
 ```sh
-./wiki.sh copy /Volumes/<card name>   # copies Wikipedia + the app, then re-reads the copy to verify it
+./wiki.sh push            # Wiki Reader, the index and Wikipedia, into the Download folder
+./wiki.sh verify device   # optional: reads Wikipedia back and re-checks it (as slow as the copy)
 ```
 
-Eject the card, put it in the e-reader, and install the Kiwix `.apk` from the e-reader's file manager.
+Files already on the e-reader are skipped, so the same command sends an updated app or index. Keep
+the e-reader awake during the big copy; it cannot resume, so an interrupted one starts over.
 
-**USB cable** (for internal storage; macOS cannot browse Android storage on its own, so this uses
-the `libmtp` tools):
+This uses MTP, the ordinary Android file-transfer mode. `adb` is not used: the Viwoods AiPaper
+Reader shows up in adb but refuses its shell, install and file-transfer commands.
+
+## 3. On the e-reader
+
+1. In the file manager, open Download and tap `wiki-reader-….apk` to install it.
+2. Open **Wiki Reader**. The first time, tap **Allow file access** and switch on "Allow access to
+   manage all files", then go back. It needs this to read a file in Download; the app has no
+   internet permission.
+3. Type a title. Tap a result to read it.
+
+In an article, the bar at the bottom has Back, Search, text size (A− / A+), how far through the
+article you are, and page-turn buttons (▲ ▼). Volume and page keys turn pages too.
+
+## How search works, and its limits
+
+The index holds one entry per title or alternative name (16.8 million), sorted so that a search is
+a couple of binary searches over a memory-mapped file. It ignores capitals, accents and
+punctuation, matches the start of any word in a title, and falls back to "all these words in any
+order". Results are ranked by how well known the article is, estimated from Kiwix's top-articles
+selection, article length, and how many alternative names point at it.
+
+- It searches **titles**, not article text. For full-text search, use Kiwix with the same file.
+- The `nopic` build has no images, so Wiki Reader hides the empty picture frames.
+- Links that leave Wikipedia cannot open; the app says so.
+
+## Using Kiwix instead
 
 ```sh
-brew install libmtp
-# plug the e-reader in, unlock it, and choose "File transfer" if it asks
-./wiki.sh push                        # copies the Kiwix app and Wikipedia to the Download folder
-./wiki.sh verify device               # optional: reads the copy back and re-checks it
+./wiki.sh apk             # download the Kiwix app, verified against its GitHub release checksum
+./wiki.sh push kiwix      # copy Wikipedia and the Kiwix app over USB
+./wiki.sh copy /Volumes/<card name>   # or onto a microSD card (64 GB or larger, exFAT)
+./wiki.sh serve           # or just try it on the Mac at http://localhost:8080
 ```
 
-Keep the e-reader awake while it copies; the transfer cannot resume, so an interrupted one starts
-over. Then open the e-reader's file manager, go to Download, and tap the Kiwix `.apk` to install it.
+## Updating the articles
 
-`adb` is not used. The Viwoods AiPaper Reader shows up in adb but refuses its shell, install and
-file-transfer commands.
+```sh
+./wiki.sh update
+```
 
-## 3. Read
+This checks Kiwix for a newer snapshot and, if there is one, downloads and verifies it, rebuilds the
+index, removes the old snapshot from the e-reader, copies the new one over, and deletes the old
+copy from the Mac. Allow about an hour, nearly all of it unattended. It can be run at any point and
+picks up where things stand: without the e-reader plugged in it prepares everything on the Mac, and
+run again with it plugged in it finishes the swap.
 
-Open Kiwix on the e-reader and allow it to access files when it asks. The Wikipedia file should
-appear in its library; if it does not, use the library's open-file button and pick the `.zim`
-file. Use the search icon to look things up.
+Things to know:
 
-## Other sizes and updates
+- Articles are only as fresh as Kiwix's builds. It publishes the full-text build roughly every three
+  months; when there is nothing newer, `update` says so and changes nothing.
+- Neither side can hold two 53 GB snapshots. On the e-reader the old one is removed first, so there
+  is no Wikipedia on it during the copy (about half an hour). On the Mac the old copy is removed
+  before the download whenever there is not room for both.
+- It stays with the size you already use. To switch, name one: `./wiki.sh update mini`.
+
+## Other sizes
 
 ```sh
 ./wiki.sh fetch mini   # intros only, ~13 GB, for e-readers with little storage
 ./wiki.sh fetch maxi   # with images, ~120 GB
 ```
 
-Kiwix publishes a new snapshot every few months. Running `./wiki.sh fetch` again downloads the
-newest one; delete the old `.zim` from `data/zim/` and from the e-reader afterwards.
+## Working on Wiki Reader
+
+[reader/](reader/) is a Gradle project with three modules:
+
+- `core`: reads ZIM files and searches the title index. Plain Kotlin, shared by the other two.
+- `indexer`: the command-line tool behind `./wiki.sh index`. Its `search` and `cat` commands show on
+  the Mac exactly what the app would find and display.
+- `app`: the Android app. Plain views and a WebView; no AndroidX, no JavaScript.
+
+The app is signed with this Mac's Android debug key (`~/.android/debug.keystore`). Builds from
+another machine count as a different app, and Android will ask for the old one to be uninstalled.
+
+Since nothing can be installed or inspected on the e-reader from the Mac, test in an emulator first:
+push a small build such as `wikipedia_en_top_nopic` and its `.idx` into the emulator's
+`/sdcard/Download`, then `adb install` the APK.
