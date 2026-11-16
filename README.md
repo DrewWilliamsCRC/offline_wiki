@@ -110,14 +110,32 @@ Things to know:
 ./wiki.sh fetch maxi   # with images, ~120 GB
 ```
 
-## iPhone and iPad (in progress)
+## iPhone and iPad
 
-[ios/](ios/) holds an iOS version that reads the same two files. Its reader and search are a Swift
-port of the Android app's, and on the full Wikipedia file they return byte-identical articles and
-the same search results in the same order. The app around them (search screen, article view) is
-written but has not been built or run yet: that needs Xcode's licence accepted on this Mac
-(`sudo xcodebuild -license accept`), an iOS simulator, and, for a real device, an Apple ID signed
-into Xcode.
+[ios/](ios/) holds the same reader as an iOS app. Its file reader and search are a Swift port of the
+Android app's; on the full Wikipedia file the two return byte-identical articles and the same search
+results in the same order. The app has a search screen (results as you type, recently read, a
+random article) and an article view with back/forward, text size and a dark appearance.
+
+It builds and passes its tests in the iPhone and iPad simulators against the full Wikipedia file.
+It has not been installed on a real device yet.
+
+To try it in a simulator (needs Xcode, and `brew install xcodegen`):
+
+```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+cd ios && xcodegen generate
+xcodebuild -project WikiReader.xcodeproj -scheme WikiReader -derivedDataPath DerivedData \
+  -destination 'platform=iOS Simulator,name=iPhone 17' build
+xcrun simctl boot "iPhone 17"
+xcrun simctl install booted DerivedData/Build/Products/Debug-iphonesimulator/WikiReader.app
+SIMCTL_CHILD_WIKI_DIR=$PWD/../data/zim xcrun simctl launch booted dev.offlinewiki.reader
+open -a Simulator
+```
+
+On a real device the app needs the Wikipedia `.zim` and its `.zim.idx` (about 54 GB together) in
+its own folder: connect the device, select it in the Finder, open the Files tab and drag both onto
+Wiki Reader. They can also stay on an external drive; the app asks for the folder.
 
 ## Working on Wiki Reader
 

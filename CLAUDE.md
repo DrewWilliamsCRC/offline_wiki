@@ -142,14 +142,15 @@ An iPhone/iPad version that reads the same `.zim` and `.zim.idx` files.
 
 - `ios/Package.swift` defines **WikiCore**, a Swift port of `reader/core` (`ZimFile`, `TitleIndex`,
   `SearchText`), and **wikicheck**, a command-line tool for comparing it with the Kotlin code.
-- `ios/App/` is the SwiftUI app: `SearchView`, `ArticleView`, and `WebController`, which serves
-  articles to a WKWebView from `wiki://offline/<zim path>` through a `WKURLSchemeHandler`.
+- `ios/App/Sources` is the SwiftUI app: `SearchView`, `ArticleView`, and `WebController`, which
+  serves articles to a WKWebView from `wiki://offline/<zim path>` through a `WKURLSchemeHandler`
+  (`ArticleServer`). `ios/App/UITests` drives it in the simulator.
 - `ios/project.yml` describes the Xcode project; `xcodegen generate` writes `WikiReader.xcodeproj`,
   which is git-ignored.
 
-**Status on 2026-11-16: the app in `ios/App` has never been compiled or run.** Xcode's licence had
-not been accepted on this Mac (`sudo xcodebuild -license accept`, which only the user can do), so
-only WikiCore and wikicheck were built and verified. Delete this paragraph once the app builds.
+As of 2026-11-16 the app builds and its UI tests pass in the iPhone and iPad simulators against the
+full Wikipedia file. It has **not** been installed on a real device: that needs the user's Apple ID
+signed into Xcode and a development team chosen for the target.
 
 ```sh
 cd ios && swift build -c release          # WikiCore + wikicheck; needs only the command-line tools
@@ -157,6 +158,16 @@ W=ios/.build/release/wikicheck; K=reader/indexer/build/install/indexer/bin/index
 $W search <file.zim> <words>              # must equal `$K search ...` minus its last (timing) line
 $W cat <file.zim> <Path> | shasum         # must equal `$K cat ...`
 $W normalize <file.zim> [step]            # re-derives the index's normalized titles in Swift
+
+# The app and its UI tests need Xcode itself. xcode-select points at the command-line tools on
+# this Mac, so name Xcode per command instead of switching it (which needs sudo):
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+cd ios && xcodegen generate
+xcodebuild -project WikiReader.xcodeproj -scheme WikiReader -derivedDataPath DerivedData \
+  -destination 'generic/platform=iOS Simulator' build
+TEST_RUNNER_WIKI_DIR=$PWD/../data/zim TEST_RUNNER_SHOT_DIR=<folder for screenshots> \
+  xcodebuild test -project WikiReader.xcodeproj -scheme WikiReader -derivedDataPath DerivedData \
+  -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 Things to know:
@@ -165,17 +176,26 @@ Things to know:
   `SearchText.normalize`.** A change to any of them in Kotlin must be mirrored in Swift, then checked
   with the commands above. On the June 2026 file both return byte-identical articles and identical
   results for every query tried.
-- `wikicheck normalize` reports about ten differing titles out of 16.8 million. They are letters
-  added to Unicode after the version the indexer's JVM knows; that gap cannot be closed from Swift.
-- `xcode-select` points at the command-line tools. Use Xcode per command with
-  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` rather than switching it (needs sudo).
+- `wikicheck normalize` reports ten differing titles out of 16.8 million. They are letters added to
+  Unicode after the version the indexer's JVM knows; that gap cannot be closed from Swift.
 - The command-line tools alone cannot compile SwiftUI views: in this SDK `@State` is a macro whose
   plugin ships only with Xcode. `swift build` therefore covers WikiCore and wikicheck, not the app.
 - Apple's Compression framework has no zstd, hence the `facebook/zstd` package dependency.
 - The app looks for files in its Documents folder (Finder file sharing, or the Files app), in a
-  folder the user chose, and in `WIKI_DIR` if that environment variable is set. The last is meant
-  for the simulator, whose apps can read the Mac's disk:
+  folder the user chose, and in `WIKI_DIR` if that environment variable is set. Simulator apps can
+  read the Mac's disk, so `WIKI_DIR` lets the UI tests run against the real 52.7 GB file in
+  `data/zim` without copying it. By hand:
   `SIMCTL_CHILD_WIKI_DIR=$PWD/data/zim xcrun simctl launch booted dev.offlinewiki.reader`.
+- **Dark appearance in the simulator needs care.** `XCUIDevice.shared.appearance` fails quietly here
+  (the test host runs `xcrun simctl` against the command-line tools), and
+  `xcrun simctl ui <device> appearance dark` on a headless simulator only takes effect after
+  `simctl shutdown` and `boot`. `testDarkAppearance` asserts on screen brightness, so it fails
+  rather than passing falsely; set the appearance and restart the simulator before running it.
+- **"No images" builds come in two shapes.** The full build removes pictures but leaves their frames
+  and captions; the "top" build swaps each picture for a transparent placeholder. The stylesheet
+  both apps inject (`ReaderScreen.STYLE` on Android, `ArticleServer.style()` on iOS) hides any
+  picture frame without a real picture in it. Check changes to it against both builds; only the
+  small one fits in the Android emulator.
 
 ## Conventions and constraints
 
@@ -197,5 +217,10 @@ Things to know:
   `core` depends on it `compileOnly`; the app supplies the `.aar`, the indexer the plain jar.
 - The APK is signed with this Mac's Android debug key and named after its content hash. A build
   signed elsewhere cannot update the installed app.
+- **Dependabot** (`.github/dependabot.yml`) opens weekly pull requests for Gradle (`reader/`), Swift
+  (`ios/`) and GitHub Actions. There is no CI that builds the apps, so build and check each one
+  locally before merging; nothing auto-merges. `zstd-jni` is ignored there on purpose (see the pin
+  above). `.github/workflows/dependency-submission.yml` reports the Gradle project's resolved
+  dependencies to GitHub, which is what lets Dependabot raise security alerts for them.
 - **E-ink UI rules**: pure black on white, no animation, ripple or elevation, and labels that must
   fit a fixed width go through `Ui.fitOneLine`. Check layouts at `font_scale` 1.3 as well as 1.0.
