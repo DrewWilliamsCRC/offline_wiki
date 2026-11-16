@@ -218,8 +218,9 @@ class ReaderScreen(
         // Wikipedia's own stylesheet does the layout; this only adapts it to a small e-ink screen:
         //  - pure black on pure white (greys dither badly), links underlined instead of blue;
         //  - nothing animated, no side margins, navigation boxes and maintenance banners removed;
-        //  - in a "no images" build every picture is a transparent placeholder, so those are
-        //    dropped together with the frames and captions that would surround empty space.
+        //  - "no images" builds either swap each picture for a transparent placeholder or remove
+        //    it and leave its frame and caption behind, so any picture frame without a real
+        //    picture in it is dropped whole.
         const val STYLE = """<style>
 html,body{background:#fff!important}
 body,body *{color:#000!important;background-color:transparent!important;background-image:none!important;animation:none!important;transition:none!important;text-shadow:none!important;box-shadow:none!important;scroll-behavior:auto!important}
@@ -228,7 +229,7 @@ a,a:visited{text-decoration:underline!important}
 .mw-body{padding:0 12px 24px!important}
 .navbox,.navbox-styles,.sistersitebox,.side-box,.mw-editsection,.noprint,.mw-jump-link,.mw-footer,#footer,.ambox,.mw-indicators{display:none!important}
 img[src^="data:image/svg+xml"]{display:none!important}
-figure:has(img[src^="data:image/svg+xml"]),.thumb:has(img[src^="data:image/svg+xml"]),li.gallerybox:has(img[src^="data:image/svg+xml"]),.infobox-image:has(img[src^="data:image/svg+xml"]){display:none!important}
+:is(figure,.thumb,.tmulti,li.gallerybox,.infobox-image):not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
 table{max-width:100%!important}
 th{font-weight:bold!important}
 pre{white-space:pre-wrap!important}
