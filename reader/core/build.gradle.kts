@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.jvm")
 }
 
-val zstdVersion: String by project
+val zstdVersion = providers.gradleProperty("zstdVersion").get()
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17

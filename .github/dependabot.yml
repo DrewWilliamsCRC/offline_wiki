@@ -14,11 +14,13 @@ updates:
     assignees:
       - DrewWilliamsCRC
     groups:
-      # The Android Gradle Plugin and Kotlin only work in matching versions, so move them together.
+      # The Android Gradle Plugin, Kotlin and Gradle itself only work in matching versions, so move
+      # them together. Upgraded one at a time, each pull request fails to build on its own.
       build-plugins:
         patterns:
           - "com.android.*"
           - "org.jetbrains.kotlin*"
+          - "gradle-wrapper"
     ignore:
       # Pinned on purpose: newer releases' Android packages need a newer compileSdk than this
       # project builds against. Raise compileSdk first, then remove this rule.

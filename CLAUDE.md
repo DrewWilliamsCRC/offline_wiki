@@ -211,8 +211,16 @@ Things to know:
   old copy before fetching or sending the new one; preserve that ordering.
 - `update` and `push` must act on a snapshot chosen by **name** (the date suffix), never by
   modification time. `cmd_update` sets `USE_ZIM` for this.
-- **Use `./gradlew`, not the system `gradle`.** The wrapper pins Gradle 8.10.2 for Android Gradle
-  Plugin 8.7.3 and Kotlin 2.0.21; Homebrew's Gradle is 9.x and does not work with that plugin.
+- **Use `./gradlew`, not the system `gradle`.** The wrapper pins Gradle 9.9.1 (with its checksum)
+  for Android Gradle Plugin 9.5.1 and Kotlin 2.4.21; Homebrew's Gradle moves on without notice.
+  The plugin and Gradle only work in matching major versions, so upgrade them together: Dependabot
+  groups them for that reason.
+- The Android Gradle Plugin compiles Kotlin itself since version 9, so `app` applies no Kotlin
+  plugin and refuses `org.jetbrains.kotlin.android`. The Kotlin version everywhere is the one
+  `org.jetbrains.kotlin.jvm` declares in `reader/build.gradle.kts`.
+- To check a toolchain upgrade, build the indexes with the old and new indexer and `cmp` them
+  (the build is deterministic, so they must be byte-identical), diff `search` and `cat` output, and
+  compare emulator screenshots of the old and new APK.
 - `zstd-jni` is pinned to 1.5.7-4, the newest release whose `.aar` builds against `compileSdk` 34.
   `core` depends on it `compileOnly`; the app supplies the `.aar`, the indexer the plain jar.
 - The APK is signed with this Mac's Android debug key and named after its content hash. A build
