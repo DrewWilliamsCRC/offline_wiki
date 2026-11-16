@@ -152,3 +152,9 @@ another machine count as a different app, and Android will ask for the old one t
 Since nothing can be installed or inspected on the e-reader from the Mac, test in an emulator first:
 push a small build such as `wikipedia_en_top_nopic` and its `.idx` into the emulator's
 `/sdcard/Download`, then `adb install` the APK.
+
+## License
+
+The code in this repository is under the [MIT License](LICENSE). Wikipedia's articles, which
+`./wiki.sh` downloads from Kiwix and are not part of this repository, are under Wikipedia's own
+license, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
