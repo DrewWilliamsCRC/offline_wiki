@@ -224,7 +224,10 @@ class ReaderScreen(
         //  - so is a location map without its picture (its place-name labels would otherwise land
         //    on the rows around it), with the infobox row holding it and that row's caption above.
         //    A row counts only if the map sits in its cell directly or under at most three plain
-        //    divs; "any row containing a map" would also catch a row holding a nested infobox.
+        //    divs; "any row containing a map" would also catch a row holding a nested infobox;
+        //  - and so is a settlement infobox's flag, seal or coat of arms without its picture, which
+        //    would leave just its caption, with their whole row when nothing else is in it. A row
+        //    that also holds a table (Melbourne's neighbouring places) stays.
         const val STYLE = """<style>
 html,body{background:#fff!important}
 body,body *{color:#000!important;background-color:transparent!important;background-image:none!important;animation:none!important;transition:none!important;text-shadow:none!important;box-shadow:none!important;scroll-behavior:auto!important}
@@ -237,6 +240,8 @@ img[src^="data:image/svg+xml"]{display:none!important}
 .locmap:not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
 .infobox tr:has(>td>.locmap,>td>div>.locmap,>td>div>div>.locmap,>td>div>div>div>.locmap):not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
 .infobox tr:has(>td:only-child>.infobox-caption:only-child):has(+tr>td>.locmap,+tr>td>div>.locmap,+tr>td>div>div>.locmap,+tr>td>div>div>div>.locmap):not(:has(+tr img:not([src^="data:image/svg+xml"]))){display:none!important}
+.ib-settlement-cols-cell:not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
+.infobox tr:has(>td.maptable):not(:has(img:not([src^="data:image/svg+xml"]),table)){display:none!important}
 table{max-width:100%!important}
 th{font-weight:bold!important}
 pre{white-space:pre-wrap!important}

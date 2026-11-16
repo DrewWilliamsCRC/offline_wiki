@@ -194,6 +194,9 @@ final class ArticleServer: NSObject {
     //    the rows around it), with the infobox row holding it and that row's caption above. A row
     //    counts only if the map sits in its cell directly or under at most three plain divs; "any
     //    row containing a map" would also catch a row holding a nested infobox;
+    //  - and so is a settlement infobox's flag, seal or coat of arms without its picture, which
+    //    would leave just its caption, with their whole row when nothing else is in it. A row that
+    //    also holds a table (Melbourne's neighbouring places) stays;
     //  - a dark appearance that follows the system setting.
     private func style() -> String {
         """
@@ -207,6 +210,8 @@ final class ArticleServer: NSObject {
         .locmap:not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
         .infobox tr:has(>td>.locmap,>td>div>.locmap,>td>div>div>.locmap,>td>div>div>div>.locmap):not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
         .infobox tr:has(>td:only-child>.infobox-caption:only-child):has(+tr>td>.locmap,+tr>td>div>.locmap,+tr>td>div>div>.locmap,+tr>td>div>div>div>.locmap):not(:has(+tr img:not([src^="data:image/svg+xml"]))){display:none!important}
+        .ib-settlement-cols-cell:not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
+        .infobox tr:has(>td.maptable):not(:has(img:not([src^="data:image/svg+xml"]),table)){display:none!important}
         table{max-width:100%!important}
         pre{white-space:pre-wrap!important}
         @media (prefers-color-scheme: dark){
