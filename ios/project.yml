@@ -1,0 +1,34 @@
+# Describes the Xcode project for the iOS app. The .xcodeproj itself is generated, not kept:
+#   xcodegen generate        (brew install xcodegen)
+name: WikiReader
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+packages:
+  # The Swift package in this folder: the ZIM reader and title-index search.
+  WikiCore:
+    path: .
+targets:
+  WikiReader:
+    type: application
+    platform: iOS
+    sources:
+      - App/Sources
+      - App/Assets.xcassets
+    dependencies:
+      - package: WikiCore
+        product: WikiCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.offlinewiki.reader
+        INFOPLIST_FILE: App/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2" # iPhone and iPad
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        # For a real device, pick your team in Xcode (Signing & Capabilities) or pass
+        # DEVELOPMENT_TEAM=<id> to xcodebuild. The simulator needs neither.

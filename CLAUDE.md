@@ -136,6 +136,47 @@ ZIM details that are easy to get wrong: this file uses the new namespace scheme 
 indexes in `X`), has **no** title pointer list (`titlePtrPos` is all ones; only
 `X/listing/titleOrdered/v1` exists), and every content cluster is zstd.
 
+## iOS (ios/)
+
+An iPhone/iPad version that reads the same `.zim` and `.zim.idx` files.
+
+- `ios/Package.swift` defines **WikiCore**, a Swift port of `reader/core` (`ZimFile`, `TitleIndex`,
+  `SearchText`), and **wikicheck**, a command-line tool for comparing it with the Kotlin code.
+- `ios/App/` is the SwiftUI app: `SearchView`, `ArticleView`, and `WebController`, which serves
+  articles to a WKWebView from `wiki://offline/<zim path>` through a `WKURLSchemeHandler`.
+- `ios/project.yml` describes the Xcode project; `xcodegen generate` writes `WikiReader.xcodeproj`,
+  which is git-ignored.
+
+**Status on 2026-11-16: the app in `ios/App` has never been compiled or run.** Xcode's licence had
+not been accepted on this Mac (`sudo xcodebuild -license accept`, which only the user can do), so
+only WikiCore and wikicheck were built and verified. Delete this paragraph once the app builds.
+
+```sh
+cd ios && swift build -c release          # WikiCore + wikicheck; needs only the command-line tools
+W=ios/.build/release/wikicheck; K=reader/indexer/build/install/indexer/bin/indexer
+$W search <file.zim> <words>              # must equal `$K search ...` minus its last (timing) line
+$W cat <file.zim> <Path> | shasum         # must equal `$K cat ...`
+$W normalize <file.zim> [step]            # re-derives the index's normalized titles in Swift
+```
+
+Things to know:
+
+- **There are now two implementations of the index format, the search order and
+  `SearchText.normalize`.** A change to any of them in Kotlin must be mirrored in Swift, then checked
+  with the commands above. On the June 2026 file both return byte-identical articles and identical
+  results for every query tried.
+- `wikicheck normalize` reports about ten differing titles out of 16.8 million. They are letters
+  added to Unicode after the version the indexer's JVM knows; that gap cannot be closed from Swift.
+- `xcode-select` points at the command-line tools. Use Xcode per command with
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` rather than switching it (needs sudo).
+- The command-line tools alone cannot compile SwiftUI views: in this SDK `@State` is a macro whose
+  plugin ships only with Xcode. `swift build` therefore covers WikiCore and wikicheck, not the app.
+- Apple's Compression framework has no zstd, hence the `facebook/zstd` package dependency.
+- The app looks for files in its Documents folder (Finder file sharing, or the Files app), in a
+  folder the user chose, and in `WIKI_DIR` if that environment variable is set. The last is meant
+  for the simulator, whose apps can read the Mac's disk:
+  `SIMCTL_CHILD_WIKI_DIR=$PWD/data/zim xcrun simctl launch booted dev.offlinewiki.reader`.
+
 ## Conventions and constraints
 
 - **`wiki.sh` targets macOS's bash 3.2**: no associative arrays, `mapfile`, or `${var,,}`.

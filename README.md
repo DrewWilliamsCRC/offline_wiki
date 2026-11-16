@@ -110,6 +110,15 @@ Things to know:
 ./wiki.sh fetch maxi   # with images, ~120 GB
 ```
 
+## iPhone and iPad (in progress)
+
+[ios/](ios/) holds an iOS version that reads the same two files. Its reader and search are a Swift
+port of the Android app's, and on the full Wikipedia file they return byte-identical articles and
+the same search results in the same order. The app around them (search screen, article view) is
+written but has not been built or run yet: that needs Xcode's licence accepted on this Mac
+(`sudo xcodebuild -license accept`), an iOS simulator, and, for a real device, an Apple ID signed
+into Xcode.
+
 ## Working on Wiki Reader
 
 [reader/](reader/) is a Gradle project with three modules:
