@@ -1,9 +1,12 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+// The Android Gradle Plugin compiles Kotlin itself since version 9, so there is no separate Kotlin
+// plugin here. The Kotlin version comes from org.jetbrains.kotlin.jvm in the root build file.
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
-val zstdVersion: String by project
+val zstdVersion = providers.gradleProperty("zstdVersion").get()
 
 android {
     namespace = "dev.offlinewiki.reader"
@@ -30,8 +33,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     lint { checkReleaseBuilds = false }
+}
+
+kotlin {
+    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
 }
 
 dependencies {
