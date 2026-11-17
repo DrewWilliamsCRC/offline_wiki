@@ -3,6 +3,8 @@ package dev.offlinewiki.reader
 import android.app.Activity
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.view.Gravity
 import android.view.View
@@ -11,14 +13,19 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.BaseAdapter
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import wikireader.core.ArticleSections
 import java.io.ByteArrayInputStream
 
 /**
  * Shows one article in a WebView fed straight from the Wikipedia file, with controls suited to
- * e-ink: whole-page turns instead of smooth scrolling, text size buttons, and no animation.
+ * e-ink: whole-page turns instead of smooth scrolling, text size buttons, a list of the article's
+ * sections to jump to, and no animation.
  */
 class ReaderScreen(
     private val activity: Activity,
@@ -49,6 +56,62 @@ class ReaderScreen(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Library.Item>): Boolean = size > 48
     }
 
+    // The section headings of the articles shown lately, read from each one's HTML as it is served.
+    private val outlines = object : LinkedHashMap<String, List<ArticleSections.Section>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<ArticleSections.Section>>): Boolean = size > 8
+    }
+
+    private var sections: List<ArticleSections.Section> = emptyList()
+
+    // The first row is the top of the article; the sections follow, indented by their level.
+    private val sectionRows = object : BaseAdapter() {
+        override fun getCount(): Int = sections.size + 1
+        override fun getItem(position: Int): Any? = sections.getOrNull(position - 1)
+        override fun getItemId(position: Int): Long = position.toLong()
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val row = (convertView as? TextView) ?: TextView(activity).apply {
+                setTextColor(Color.BLACK)
+                minimumHeight = Ui.dp(activity, 52)
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val section = sections.getOrNull(position - 1)
+            val depth = ((section?.level ?: 2) - 2).coerceIn(0, 3)
+            row.text = section?.title ?: TOP
+            row.typeface = if (depth == 0) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            row.textSize = if (depth == 0) 20f else 18f
+            row.setPadding(Ui.dp(activity, 14 + 22 * depth), Ui.dp(activity, 8), Ui.dp(activity, 14), Ui.dp(activity, 8))
+            return row
+        }
+    }
+
+    private val sectionList = ListView(activity).apply {
+        adapter = sectionRows
+        divider = ColorDrawable(Color.BLACK)
+        dividerHeight = Ui.dp(activity, 1)
+        selector = ColorDrawable(Color.TRANSPARENT)
+        overScrollMode = View.OVER_SCROLL_NEVER
+        isVerticalFadingEdgeEnabled = false
+        isVerticalScrollBarEnabled = false // it is grey and fades out, both of which e-ink shows badly
+        setOnItemClickListener { _, _, position, _ -> jumpTo(sections.getOrNull(position - 1)) }
+    }
+
+    private val sectionsNote = TextView(activity).apply {
+        textSize = 15f
+        setTextColor(Color.BLACK)
+        setPadding(Ui.dp(activity, 14), Ui.dp(activity, 8), Ui.dp(activity, 14), Ui.dp(activity, 8))
+    }
+
+    // Lies over the article while open, so the article keeps its size and place underneath.
+    private val sectionsPanel = LinearLayout(activity).apply {
+        orientation = LinearLayout.VERTICAL
+        setBackgroundColor(Color.WHITE)
+        visibility = View.GONE
+        addView(sectionsNote)
+        addView(Ui.rule(activity), ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(activity, 1))
+        addView(sectionList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+    }
+
     private val web = WebView(activity).apply {
         setBackgroundColor(Color.WHITE)
         overScrollMode = View.OVER_SCROLL_NEVER
@@ -68,7 +131,11 @@ class ReaderScreen(
     val view: LinearLayout = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
         setBackgroundColor(Color.WHITE)
-        addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        val content = FrameLayout(activity).apply {
+            addView(web, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            addView(sectionsPanel, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         addView(Ui.rule(activity), ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(activity, 1))
         val bar = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -76,24 +143,34 @@ class ReaderScreen(
             // whose text is a different size from its neighbours'.
             isBaselineAligned = false
             fun add(v: View, weight: Float) = addView(v, LinearLayout.LayoutParams(0, Ui.dp(activity, 52), weight))
-            add(Ui.button(activity, "Back", fit = true) { onBack() }, 1.3f)
-            add(Ui.button(activity, "Search", fit = true) { onSearch() }, 1.8f)
-            add(Ui.button(activity, "A−", fit = true) { changeZoom(-1) }, 1f)
-            add(Ui.button(activity, "A+", fit = true) { changeZoom(1) }, 1f)
-            add(position, 1f)
-            add(Ui.button(activity, "▲", fit = true) { turnPage(-1) }, 1.1f)
-            add(Ui.button(activity, "▼", fit = true) { turnPage(1) }, 1.1f)
+            add(Ui.button(activity, "Back", fit = true) { onBack() }, 1.2f)
+            add(Ui.button(activity, "Search", fit = true) { hideSections(); onSearch() }, 1.5f)
+            add(Ui.button(activity, "Sections", fit = true) { toggleSections() }, 1.9f)
+            add(Ui.button(activity, "A−", fit = true) { changeZoom(-1) }, 0.9f)
+            add(Ui.button(activity, "A+", fit = true) { changeZoom(1) }, 0.9f)
+            add(position, 0.9f)
+            add(Ui.button(activity, "▲", fit = true) { turnPage(-1) }, 1f)
+            add(Ui.button(activity, "▼", fit = true) { turnPage(1) }, 1f)
         }
         addView(bar)
     }
 
     fun open(path: String) {
         hasPage = true
+        hideSections()
         web.loadUrl(urlFor(path))
     }
 
-    /** Goes to the previous article; false if there is none. */
+    /**
+     * Closes the list of sections if it is open; otherwise goes back one step, which is the place
+     * a jump to a section was made from, or the previous article. False if there is nothing to go
+     * back to.
+     */
     fun back(): Boolean {
+        if (sectionsShowing()) {
+            hideSections()
+            return true
+        }
         if (!web.canGoBack()) return false
         web.goBack()
         return true
@@ -101,9 +178,54 @@ class ReaderScreen(
 
     /** Moves one screen down (1) or up (-1), keeping a line of overlap so the eye can find its place. */
     fun turnPage(direction: Int) {
+        if (sectionsShowing()) return turnSectionsPage(direction)
         val step = web.height - Ui.dp(activity, 32)
         web.scrollTo(0, (web.scrollY + direction * step).coerceIn(0, maxScroll()))
     }
+
+    /** Pages the list by whole rows: the last row showing becomes the first, or the reverse. */
+    private fun turnSectionsPage(direction: Int) {
+        val first = sectionList.firstVisiblePosition
+        val last = sectionList.lastVisiblePosition
+        if (first < 0 || last <= first) return
+        sectionList.setSelection(if (direction > 0) last else (first - (last - first)).coerceAtLeast(0))
+    }
+
+    private fun sectionsShowing(): Boolean = sectionsPanel.visibility == View.VISIBLE
+
+    private fun hideSections() {
+        sectionsPanel.visibility = View.GONE
+    }
+
+    private fun toggleSections() {
+        if (sectionsShowing()) return hideSections()
+        val path = currentPath() ?: return
+        val found = synchronized(outlines) { outlines[path] }
+            ?: runCatching { item(path)?.bytes?.let(ArticleSections::parse) }.getOrNull().orEmpty()
+        if (found.isEmpty()) {
+            Toast.makeText(activity, "This article has no sections.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        sections = found
+        sectionRows.notifyDataSetChanged()
+        sectionList.setSelection(0)
+        sectionsNote.text = web.title?.takeIf { it.isNotBlank() }?.let { "Sections of $it" } ?: "Sections"
+        sectionsPanel.visibility = View.VISIBLE
+    }
+
+    /**
+     * Shows a section, or the top of the article for null. With scripts off, the way to reach a
+     * heading is the page's own address with the heading's id after "#": the WebView scrolls there
+     * without reloading and, as with a footnote link, Back returns to where the reader was.
+     */
+    private fun jumpTo(section: ArticleSections.Section?) {
+        hideSections()
+        if (section == null) return web.scrollTo(0, 0)
+        val page = web.url?.substringBefore('#') ?: return
+        web.loadUrl(page + "#" + Uri.encode(section.id))
+    }
+
+    private fun currentPath(): String? = web.url?.let { pathOf(Uri.parse(it)) }?.takeIf { it.isNotEmpty() }
 
     private fun maxScroll(): Int =
         ((web.contentHeight * activity.resources.displayMetrics.density).toInt() - web.height).coerceAtLeast(0)
@@ -168,7 +290,9 @@ class ReaderScreen(
             else response("text/plain", ByteArray(0), 404)
         val type = item.mimeType.substringBefore(';').trim()
         if (mainFrame && item.bytes.size < 2048 && String(item.bytes).contains("http-equiv=\"refresh\"")) forwarding += path
-        val bytes = if (mainFrame && type == "text/html") withStyle(item.bytes) else item.bytes
+        val article = mainFrame && type == "text/html"
+        if (article) ArticleSections.parse(item.bytes).let { synchronized(outlines) { outlines[path] = it } }
+        val bytes = if (article) withStyle(item.bytes) else item.bytes
         return response(type, bytes, 200, item.mimeType.substringAfter("charset=", "utf-8").substringBefore(';').trim())
     }
 
@@ -212,6 +336,7 @@ class ReaderScreen(
         const val ZOOM_KEY = "zoom"
         const val DEFAULT_ZOOM = 2
         const val MISSING_TITLE = "Not found"
+        const val TOP = "(Top)"
         val ZOOMS = intArrayOf(85, 100, 115, 130, 150, 175, 200, 230)
         val HEAD_END = "</head>".toByteArray()
 
@@ -227,7 +352,9 @@ class ReaderScreen(
         //    divs; "any row containing a map" would also catch a row holding a nested infobox;
         //  - and so is a settlement infobox's flag, seal or coat of arms without its picture, which
         //    would leave just its caption, with their whole row when nothing else is in it. A row
-        //    that also holds a table (Melbourne's neighbouring places) stays.
+        //    that also holds a table (Melbourne's neighbouring places) stays;
+        //  - a jump to a section puts its heading at the top of the screen. Wikipedia's skin leaves
+        //    75px above it for a sticky header that is not here.
         const val STYLE = """<style>
 html,body{background:#fff!important}
 body,body *{color:#000!important;background-color:transparent!important;background-image:none!important;animation:none!important;transition:none!important;text-shadow:none!important;box-shadow:none!important;scroll-behavior:auto!important}
@@ -242,6 +369,7 @@ img[src^="data:image/svg+xml"]{display:none!important}
 .infobox tr:has(>td:only-child>.infobox-caption:only-child):has(+tr>td>.locmap,+tr>td>div>.locmap,+tr>td>div>div>.locmap,+tr>td>div>div>div>.locmap):not(:has(+tr img:not([src^="data:image/svg+xml"]))){display:none!important}
 .ib-settlement-cols-cell:not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
 .infobox tr:has(>td.maptable):not(:has(img:not([src^="data:image/svg+xml"]),table)){display:none!important}
+.mw-heading :is(h1,h2,h3,h4,h5,h6){scroll-margin-top:8px!important}
 table{max-width:100%!important}
 th{font-weight:bold!important}
 pre{white-space:pre-wrap!important}

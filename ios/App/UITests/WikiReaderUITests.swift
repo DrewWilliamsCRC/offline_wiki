@@ -99,6 +99,45 @@ final class WikiReaderUITests: XCTestCase {
                        "a coat of arms caption without its picture is shown")
     }
 
+    func testSectionsMenuJumpsToASection() throws {
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap()
+        field.typeText("photosyn")
+        let result = app.staticTexts["Photosynthesis"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        result.tap()
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.staticTexts["Photosynthesis"].waitForExistence(timeout: 20), "the article did not load")
+
+        // A section well down the article: its heading is in the page but not on the screen.
+        let name = "Light-dependent reactions"
+        let heading = web.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10), "the article has no such heading")
+        XCTAssertFalse(heading.isHittable, "the heading is on screen before any jump")
+
+        // The menu lists the article's sections; choosing one brings its heading onto the screen,
+        // clear of the bars at the top and bottom.
+        app.buttons["Sections"].tap()
+        let row = app.buttons[name]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the menu does not list the section")
+        XCTAssertTrue(app.buttons["(Top)"].exists)
+        shot("12-sections")
+        row.tap()
+        expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: heading)
+        waitForExpectations(timeout: 10)
+        // The article's name leaves the title bar while the menu is up and returns as it closes.
+        XCTAssertTrue(app.navigationBars["Photosynthesis"].waitForExistence(timeout: 10), "the title bar lost the article's name")
+        shot("13-section")
+
+        // The first row goes back to the top of the article.
+        app.buttons["Sections"].tap()
+        XCTAssertTrue(app.buttons["(Top)"].waitForExistence(timeout: 10))
+        app.buttons["(Top)"].tap()
+        expectation(for: NSPredicate(format: "isHittable == false"), evaluatedWith: heading)
+        waitForExpectations(timeout: 10)
+    }
+
     func testDarkAppearance() throws {
         // The appearance is read when the app starts, so set it and start again.
         app.terminate()

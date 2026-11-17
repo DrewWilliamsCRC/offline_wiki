@@ -41,6 +41,7 @@ exercise the same `core` code the app runs:
 I=reader/indexer/build/install/indexer/bin/indexer
 $I search data/zim/<file>.zim <words>   # exactly what the app would list, with timing
 $I cat data/zim/<file>.zim <Path>       # an article's bytes (follows redirects)
+$I sections data/zim/<file>.zim <Path>  # its section headings, as the app's Sections menu lists them
 $I info data/zim/<file>.zim
 ```
 
@@ -103,7 +104,8 @@ Kiwix .zim ──indexer──▶ <file>.zim.idx ─┐
 
 - **core** (plain Kotlin, no Android): `ZimFile` reads the archive (directory entries by binary
   search, zstd clusters with a small cache); `TitleIndex` memory-maps and searches the index;
-  `SearchText.normalize` turns titles and queries into the form the index is sorted in.
+  `SearchText.normalize` turns titles and queries into the form the index is sorted in;
+  `ArticleSections` finds an article's headings for the Sections menu.
 - **indexer** (JVM, runs on the Mac): `IndexBuilder` holds every title in memory, ranks, sorts and
   writes the index. Needs about 3 GB of heap for full Wikipedia and takes under a minute.
 - **app** (Android): one activity swapping a `SearchScreen` and a `ReaderScreen`. Plain views and a
@@ -128,6 +130,13 @@ Things that span files:
 - **Articles are served to the WebView** from `https://wiki.offline/<zim path>` through
   `shouldInterceptRequest`, so the articles' relative links and stylesheets resolve unchanged.
   `ReaderScreen.STYLE` is injected into each article to adapt Wikipedia's CSS for e-ink.
+- **The Sections menu** lists what `ArticleSections.parse` finds in the article's HTML: every
+  `<h2>` to `<h6>` with an `id`, which is also the anchor to scroll to. Each app reads them as it
+  serves the page. The two jump differently. Android has no scripts, so it loads the page's own
+  address with `#id`: no reload, and Back returns to where the reader was, as it does after a
+  footnote link. iOS scrolls with a script call of its own, which adds nothing to back/forward.
+  Both stylesheets set the headings' `scroll-margin-top`, which Wikipedia's skin puts at 75px for
+  a sticky header that is not there.
 - Wikipedia contains over a million tiny HTML pages that only forward to a section of another
   article (a meta refresh). They are HTML entries, not ZIM redirects, so the index lists them as
   low-ranked articles and the reader passes through them.
@@ -179,6 +188,7 @@ cd ios && swift build -c release          # WikiCore + wikicheck; needs only the
 W=ios/.build/release/wikicheck; K=reader/indexer/build/install/indexer/bin/indexer
 $W search <file.zim> <words>              # must equal `$K search ...` minus its last (timing) line
 $W cat <file.zim> <Path> | shasum         # must equal `$K cat ...`
+$W sections <file.zim> <Path>             # must equal `$K sections ...`
 $W normalize <file.zim> [step]            # re-derives the index's normalized titles in Swift
 
 # The app and its UI tests need Xcode itself. xcode-select points at the command-line tools on
@@ -194,10 +204,12 @@ TEST_RUNNER_WIKI_DIR=$PWD/../data/zim TEST_RUNNER_SHOT_DIR=<folder for screensho
 
 Things to know:
 
-- **There are now two implementations of the index format, the search order and
-  `SearchText.normalize`.** A change to any of them in Kotlin must be mirrored in Swift, then checked
-  with the commands above. On the June 2026 file both return byte-identical articles and identical
-  results for every query tried.
+- **There are now two implementations of the index format, the search order,
+  `SearchText.normalize` and `ArticleSections`.** A change to any of them in Kotlin must be mirrored
+  in Swift, then checked with the commands above. On the June 2026 file both return byte-identical
+  articles and identical results for every query tried, and the same sections for the 549 articles
+  compared across both files. The rules for sections are written out at the top of
+  `ArticleSections.kt`; keep to them exactly, down to which entities are decoded.
 - `wikicheck normalize` reports ten differing titles out of 16.8 million. They are letters added to
   Unicode after the version the indexer's JVM knows; that gap cannot be closed from Swift.
 - The command-line tools alone cannot compile SwiftUI views: in this SDK `@State` is a macro whose
