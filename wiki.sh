@@ -5,19 +5,21 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ZIM_DIR="$ROOT/data/zim"
+DATA_DIR="${WIKI_DATA:-$ROOT/data}" # everything downloaded or built; ci/device.sh points it at a scratch folder
+ZIM_DIR="$DATA_DIR/zim"
 PARTIAL_DIR="$ZIM_DIR/partial" # downloads in progress; a file in ZIM_DIR itself is complete and verified
-APK_DIR="$ROOT/data/apk"       # the Kiwix app, as downloaded
-APP_DIR="$ROOT/data/app"       # the Wiki Reader app, as built from reader/
-PUSHED_DIR="$ROOT/data/pushed" # checksums of files sent to the e-reader that can change under the same name
+APK_DIR="$DATA_DIR/apk"        # the Kiwix app, as downloaded
+APP_DIR="$DATA_DIR/app"        # the Wiki Reader app, as built from reader/
+PUSHED_DIR="$DATA_DIR/pushed"  # checksums of files sent to the e-reader that can change under the same name
 READER_DIR="$ROOT/reader"
 INDEXER="$READER_DIR/indexer/build/install/indexer/bin/indexer"
 ANDROID_SDK="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}"
-ZIM_URL="https://download.kiwix.org/zim/wikipedia"
+ZIM_URL="${WIKI_ZIM_URL:-https://download.kiwix.org/zim/wikipedia}" # ci/device.sh serves its own
 APK_API="https://api.github.com/repos/kiwix/kiwix-android/releases/latest"
-BOOK="${WIKI_BOOK:-wikipedia_en_all}"             # wikipedia_en_climate-change is a small build for testing
+BOOK="${WIKI_BOOK:-wikipedia_en_all}"             # wikipedia_en_ray-charles is a small build for testing
 PORT="${WIKI_PORT:-8080}"                         # local preview port
 DEVICE_FOLDER="${WIKI_DEVICE_FOLDER:-Download}"    # top-level folder on the e-reader that "push" copies into
+MTP_PAUSE="${WIKI_MTP_PAUSE:-3}"                  # seconds between sessions with the e-reader (see mtp_query)
 SERVE_IMAGE="ghcr.io/kiwix/kiwix-serve:latest"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -28,9 +30,12 @@ on_disk() { echo $(($(stat -f %b "$1") * 512)); } # bytes actually stored; parti
 free_in() { df -Pk "$1" | awk 'NR==2 { printf "%.0f", $4 * 1024 }'; }
 human() { awk -v b="$1" 'BEGIN { if (b >= 1e9) printf "%.1f GB", b / 1e9; else printf "%.0f MB", b / 1e6 }'; }
 
-latest_zim() { # $1 = flavor; newest snapshot listed on the Kiwix download page
-  fetch_text "$ZIM_URL/" | grep -oE 'href="[^"]+"' | sed -E 's/^href="//; s/"$//' |
-    grep -E "^${BOOK}_$1_[0-9]{4}-[0-9]{2}\.zim$" | sort | tail -1
+latest_zim() { # $1 = flavor; newest snapshot listed on the Kiwix download page, or nothing if none is
+  local listing
+  listing="$(fetch_text "$ZIM_URL/")" || die "could not read the list of files at $ZIM_URL"
+  # "|| true": a book or flavor Kiwix does not publish matches nothing, which the caller reports.
+  echo "$listing" | grep -oE 'href="[^"]+"' | sed -E 's/^href="//; s/"$//' |
+    grep -E "^${BOOK}_$1_[0-9]{4}-[0-9]{2}\.zim$" | sort | tail -1 || true
 }
 
 # The Wikipedia file to work with: the one "update" has settled on, else the most recently
@@ -127,11 +132,18 @@ check_sha256() { # $1 = file, $2 = expected hash
   echo "checksum OK"
 }
 
-# SHA-256 that Kiwix publishes for a ZIM file; cached next to the file.
+# SHA-256 that Kiwix publishes for a ZIM file; cached next to the file. Assign its result to a
+# variable before using it: inside another command's arguments a failure here would go unnoticed,
+# and the comparison would then report a good file as damaged.
 published_sha256() { # $1 = final .zim path
-  local sum="$1.sha256"
-  [ -s "$sum" ] || fetch_text "$ZIM_URL/$(basename "$1").sha256" > "$sum"
-  awk '{ print $1; exit }' "$sum"
+  local sum="$1.sha256" hash
+  [ -s "$sum" ] || fetch_text "$ZIM_URL/$(basename "$1").sha256" > "$sum" || true
+  hash="$(awk '{ print $1; exit }' "$sum")"
+  if [[ ! "$hash" =~ ^[0-9a-f]{64}$ ]]; then
+    rm -f "$sum"
+    die "could not get Kiwix's checksum for $(basename "$1"). Check the connection and run the command again."
+  fi
+  echo "$hash"
 }
 
 cmd_fetch() {
@@ -192,7 +204,7 @@ for a in json.load(sys.stdin)["assets"]:
 gradle_build() {
   need java "Install a JDK, version 17 or newer (for example: brew install --cask temurin)."
   [ -d "$ANDROID_SDK/platforms" ] ||
-    die "Android SDK not found at $ANDROID_SDK. Install it with: brew install --cask android-commandlinetools && sdkmanager \"platforms;android-34\" \"build-tools;34.0.0\""
+    die "Android SDK not found at $ANDROID_SDK. Install it with: brew install --cask android-commandlinetools && sdkmanager \"platforms;android-34\" \"build-tools;36.0.0\""
   (cd "$READER_DIR" && ANDROID_HOME="$ANDROID_SDK" ./gradlew --no-daemon -q "$@")
 }
 
@@ -226,13 +238,14 @@ cmd_app() {
 local_app() { ls -t "$APP_DIR"/wiki-reader-*.apk 2>/dev/null | head -1 || true; }
 
 cmd_verify() {
-  local zim
+  local zim want
   if [ "${1:-}" = "device" ]; then
     verify_device
     return
   fi
   zim="$(local_zim)"
-  check_sha256 "$zim" "$(published_sha256 "$zim")"
+  want="$(published_sha256 "$zim")"
+  check_sha256 "$zim" "$want"
 }
 
 cmd_serve() {
@@ -245,10 +258,11 @@ cmd_serve() {
 
 # Copy the Wikipedia file (and the Kiwix APK) to an SD card or any folder, then read it back to verify.
 cmd_copy() {
-  local dest="${1:-}" zim apk dev fs
+  local dest="${1:-}" zim apk dev fs want
   [ -n "$dest" ] || die "usage: ./wiki.sh copy /Volumes/<card>"
   [ -d "$dest" ] && [ -w "$dest" ] || die "$dest is not a writable folder"
   zim="$(local_zim)"
+  want="$(published_sha256 "$zim")"
   dev="$(df -P "$dest" | awk 'NR==2 { print $1 }')"
   fs="$(mount | awk -v d="$dev" '$1 == d' | sed -E 's/.*\(([^,)]+).*/\1/' | head -1)"
   if [ "$fs" = "msdos" ] && [ "$(size_of "$zim")" -ge 4294967296 ]; then
@@ -258,7 +272,7 @@ cmd_copy() {
   require_space "$dest" $(($(size_of "$zim") + $([ -n "$apk" ] && size_of "$apk" || echo 0)))
   echo "copying $(basename "$zim") to $dest"
   rsync -h --progress --partial "$zim" "$dest/"
-  check_sha256 "$dest/$(basename "$zim")" "$(published_sha256 "$zim")"
+  check_sha256 "$dest/$(basename "$zim")" "$want"
   if [ -n "$apk" ]; then
     cp -X "$apk" "$dest/"
     echo "copied $(basename "$apk")"
@@ -284,26 +298,32 @@ mtp_progress() {
 # Run a libmtp query and print its output. A connection opened straight after the previous one
 # often fails half-way while still exiting 0, so pause first, and retry when the output shows it.
 mtp_query() {
-  local out tries=0
+  local out tries=0 said_so=no
   while :; do
-    sleep 3
+    sleep "$MTP_PAUSE"
     out="$("$@" 2>&1 || true)"
     case "$out" in
-      *"No devices"* | *"no devices"* | *"No raw devices"* | *PANIC* | *"Error "[0-9]*) ;;
+      *"No devices"* | *"No Devices"* | *"no devices"* | *"No raw devices"* | *PANIC* | *"Error "[0-9]*) said_so=yes ;;
       *"File ID:"*) break ;;
-      # A file listing with no files in it is a connection that failed quietly; that has happened
-      # in the first moments after the e-reader switches to file transfer.
+      # A file listing with no files in it is usually a connection that failed quietly; that has
+      # happened in the first moments after the e-reader switches to file transfer. So it is asked
+      # again, and believed only if every try comes back the same: an e-reader with no files yet.
       *) [ "$1" = mtp-files ] || break ;;
     esac
     tries=$((tries + 1))
-    [ "$tries" -le 5 ] ||
+    if [ "$tries" -gt 5 ]; then
+      [ "$said_so" = yes ] || break
       die "cannot talk to the e-reader. Plug it in with a USB cable, unlock it, and choose \"File transfer\" if it asks."
+    fi
   done
   echo "$out"
 }
 
+# The awk programs that read a query's output take the first match and keep reading to the end.
+# Stopping at the match ("exit") closes the pipe on whatever is still being written, and on an
+# e-reader with a few hundred files that ends the whole script, silently, with status 141.
 device_folder_id() {
-  mtp_query mtp-folders | awk -F'\t' -v n="$DEVICE_FOLDER" '$2 == n { print $1; exit }'
+  mtp_query mtp-folders | awk -F'\t' -v n="$DEVICE_FOLDER" '$2 == n && !found { print $1; found = 1 }'
 }
 
 # Prints "<id> <size>" if a file named $1 exists in folder id $2 on the e-reader.
@@ -312,7 +332,7 @@ device_file() {
     /^File ID:/ { id = $3 }
     /^ +Filename:/ { sub(/^ +Filename: /, ""); name = $0 }
     /^ +File size/ { size = $3 }
-    /^ +Parent ID:/ { if (name == want && $3 == folder) { print id, size; exit } }'
+    /^ +Parent ID:/ { if (name == want && $3 == folder && !found) { print id, size; found = 1 } }'
 }
 
 # $1 = local file, $2 = folder id on the e-reader, $3 = "mutable" for a file that can change while
@@ -336,10 +356,12 @@ push_file() {
     fi
     tries=$((tries + 1))
     [ "$tries" -le 3 ] || die "could not copy $name to the e-reader. Check the cable, keep the e-reader awake, and run push again."
-    free="$(mtp_query mtp-detect | awk '/FreeSpaceInBytes:/ { print $2; exit }')"
-    [ "${free:-0}" -gt "$size" ] || die "the e-reader has $(human "${free:-0}") free; $name needs $(human "$size")"
+    free="$(mtp_query mtp-detect | awk '/FreeSpaceInBytes:/ && !found { print $2; found = 1 }')"
+    # An app that has a deleted file open keeps its space until it lets go, which is the usual
+    # reason for too little room straight after an older snapshot was removed.
+    [ "${free:-0}" -gt "$size" ] || die "the e-reader has $(human "${free:-0}") free; $name needs $(human "$size"). If an older Wikipedia was just removed from it, an app may still be holding that space: press the e-reader's home button to leave Wiki Reader (or restart the e-reader), then run the command again."
     echo "copying $name ($(human "$size")) to the e-reader. Keep it plugged in and awake."
-    sleep 3
+    sleep "$MTP_PAUSE"
     # The file keeps its local name on the e-reader; only the folder id in the second argument is used.
     mtp-sendfile "$1" "$2/$name" 2>&1 | mtp_progress || true
     if [ -n "$sum" ]; then
@@ -391,7 +413,7 @@ device_connected() {
   command -v mtp-detect >/dev/null 2>&1 || return 1
   local tries=0
   while [ "$tries" -lt 3 ]; do
-    sleep 3
+    sleep "$MTP_PAUSE"
     case "$(mtp-detect 2>&1 || true)" in *FreeSpaceInBytes*) return 0 ;; esac
     tries=$((tries + 1))
   done
@@ -488,9 +510,10 @@ cmd_update() {
 # so it needs no disk space, but it takes about as long as the copy did.
 verify_device() {
   need mtp-getfile "Install it with: brew install libmtp"
-  local zim name found pipe reader got len tries=0
+  local zim name found pipe reader got len want tries=0
   zim="$(local_zim)"
   name="$(basename "$zim")"
+  want="$(published_sha256 "$zim")" # before the long read, so a missing checksum is not found out after it
   stay_awake
   found="$(device_file "$name" "$(device_folder_id)")"
   [ -n "$found" ] || die "$name is not in the $DEVICE_FOLDER folder on the e-reader. Run: ./wiki.sh push"
@@ -502,7 +525,7 @@ verify_device() {
     reader=$!
     exec 3> "$pipe" # held open so the checksum only finishes once the transfer has ended
     echo "reading $name ($(human "${found##* }")) back from the e-reader. Keep it plugged in and awake."
-    sleep 3
+    sleep "$MTP_PAUSE"
     mtp-getfile "${found%% *}" "$pipe" 2>&1 | mtp_progress || true
     exec 3>&-
     # Wait for the reader only: a bare "wait" would also wait for stay_awake, which never exits first.
@@ -520,7 +543,7 @@ verify_device() {
     [ "$tries" -le 2 ] || die "could not read $name back from the e-reader. Check the cable, keep it awake, and try again."
     echo "the transfer was cut short; trying again"
   done
-  [ "$got" = "$(published_sha256 "$zim")" ] ||
+  [ "$got" = "$want" ] ||
     die "the copy on the e-reader does not match the original. Run ./wiki.sh push again."
   echo "the copy on the e-reader matches: checksum OK"
 }

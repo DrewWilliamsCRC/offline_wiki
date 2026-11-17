@@ -1,6 +1,8 @@
 # Builds everything and checks what can be checked without a device or the 53 GB Wikipedia file:
 #
-#  - wiki.sh parses under macOS's own bash 3.2, the version it is written for;
+#  - the scripts parse under macOS's own bash 3.2, the version they are written for;
+#  - wiki.sh's push, update and "verify device" do the right thing to a stand-in e-reader
+#    (ci/device.sh, which also stands in for Kiwix's download server);
 #  - the Android app and the indexer build;
 #  - the Kotlin code in reader/ and its Swift port in ios/ read a small Wikipedia identically
 #    (ci/compare.sh): search results, article bytes, sections and normalized titles;
@@ -8,7 +10,7 @@
 #
 # Not covered, so still to be checked by hand before a change to them is merged: how the apps look
 # and behave (the Android emulator, the iOS UI tests, which need a multi-gigabyte Wikipedia), and
-# the half of wiki.sh that talks to the e-reader.
+# anything about a real e-reader that the stand-in does not imitate.
 name: CI
 
 on:
@@ -37,6 +39,8 @@ jobs:
           /bin/bash --version | head -1
           /bin/bash -n wiki.sh
           /bin/bash -n ci/compare.sh
+          /bin/bash -n ci/device.sh
+          /bin/bash -n ci/fake-mtp.sh
       - name: Run the script
         run: ./wiki.sh help
 
@@ -86,6 +90,34 @@ jobs:
         run: swift build -c release
       - name: Compare the two on the small Wikipedia
         run: ci/compare.sh data/zim/wikipedia_en_ray-charles_nopic_*.zim
+
+  device:
+    name: wiki.sh and a stand-in e-reader
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      # The same small Wikipedia as the comparison above: "update" builds a real index of it.
+      - name: Keep the test Wikipedia between runs
+        id: zim
+        uses: actions/cache@v6
+        with:
+          path: data/zim/*.zim
+          key: zim-ray-charles-1
+      - name: Download a small Wikipedia
+        if: steps.zim.outputs.cache-hit != 'true'
+        run: WIKI_BOOK=wikipedia_en_ray-charles ./wiki.sh fetch nopic
+      - name: Build the indexer
+        working-directory: reader
+        run: ./gradlew --no-daemon -q :indexer:installDist
+      # No device and no network: the e-reader is a folder behind ci/fake-mtp.sh, and the
+      # snapshots "Kiwix publishes" come from a web server the script starts on this machine.
+      - name: Push, update and verify against the stand-in
+        run: ci/device.sh data/zim/wikipedia_en_ray-charles_nopic_*.zim
 
   ios:
     name: iOS app

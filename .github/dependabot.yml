@@ -2,8 +2,8 @@
 # It reads this file from the default branch only. Security alerts and security-fix pull requests
 # are switched on separately, in the repository's settings.
 #
-# Nothing here merges by itself, and no CI builds the apps: build and check each pull request
-# locally (see CLAUDE.md) before merging it.
+# Nothing here merges by itself. CI builds each pull request, which is not the whole check for a
+# toolchain upgrade: see "To check a toolchain upgrade" in CLAUDE.md before merging one.
 version: 2
 updates:
   # The Android app and the index builder: Gradle plugins, libraries and the Gradle wrapper.
