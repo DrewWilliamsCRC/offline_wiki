@@ -18,13 +18,29 @@ struct WikiReaderApp: App {
 /// Shows the search screen once a Wikipedia file is open, and how to add one until then.
 struct RootView: View {
     @EnvironmentObject private var store: LibraryStore
+    @EnvironmentObject private var history: History
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        switch store.state {
-        case .ready(let library):
-            SearchView(library: library)
-        case .missing(let reason):
-            SetupView(reason: reason)
+        Group {
+            switch store.state {
+            case .ready(let library):
+                // A different file gets a new search screen, not the old one's articles.
+                SearchView(library: library).id(library.stamp)
+            case .missing(let reason):
+                SetupView(reason: reason)
+            }
+        }
+        // Files arrive, and are replaced, while the app is in the background. So it lets go of
+        // them on the way out and looks again when it comes forward.
+        .onChange(of: scenePhase) { phase in
+            switch phase {
+            case .active: store.reload()
+            case .background:
+                history.save()
+                store.suspend()
+            default: break
+            }
         }
     }
 }
@@ -33,7 +49,6 @@ struct RootView: View {
 struct SetupView: View {
     let reason: String
     @EnvironmentObject private var store: LibraryStore
-    @Environment(\.scenePhase) private var scenePhase
     @State private var choosingFolder = false
 
     var body: some View {
@@ -54,10 +69,6 @@ struct SetupView: View {
         }
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             if case .success(let folder) = result { store.choose(folder: folder) }
-        }
-        // Files usually arrive while the app is in the background, so look when it comes forward.
-        .onChange(of: scenePhase) { phase in
-            if phase == .active { store.reload() }
         }
     }
 }

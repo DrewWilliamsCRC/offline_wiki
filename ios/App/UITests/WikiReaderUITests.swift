@@ -15,6 +15,10 @@ final class WikiReaderUITests: XCTestCase {
         try XCTSkipIf(folder.isEmpty, "set TEST_RUNNER_WIKI_DIR to a folder holding a .zim and its .zim.idx")
         app = XCUIApplication()
         app.launchEnvironment["WIKI_DIR"] = folder
+        // The app opens where it was left, which for most of these tests is inside an article.
+        // This overrides what it remembers for one launch, so that each test starts at the search
+        // screen whatever the one before it did.
+        app.launchArguments = ["-reading", "NO"]
         app.launch()
     }
 
@@ -136,6 +140,63 @@ final class WikiReaderUITests: XCTestCase {
         app.buttons["(Top)"].tap()
         expectation(for: NSPredicate(format: "isHittable == false"), evaluatedWith: heading)
         waitForExpectations(timeout: 10)
+    }
+
+    func testReopensWhereTheReaderLeftOff() throws {
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap()
+        field.typeText("photosyn")
+        let result = app.staticTexts["Photosynthesis"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        result.tap()
+        XCTAssertTrue(app.webViews.firstMatch.staticTexts["Photosynthesis"].waitForExistence(timeout: 20), "the article did not load")
+
+        // Read on to a section well down the article.
+        let name = "Light-dependent reactions"
+        func heading() -> XCUIElement {
+            app.webViews.firstMatch.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
+        }
+        func waitUntilOnScreen(_ element: XCUIElement) {
+            XCTAssertTrue(element.waitForExistence(timeout: 20), "the article has no such heading")
+            expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: element)
+            waitForExpectations(timeout: 10)
+        }
+        app.buttons["Sections"].tap()
+        let row = app.buttons[name]
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the menu does not list the section")
+        row.tap()
+        waitUntilOnScreen(heading())
+        sleep(3) // the place is kept a moment after the page stops moving
+
+        // Started again, the app is back in the article and at that section, not at its top.
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Photosynthesis"].waitForExistence(timeout: 20), "the app did not reopen the article")
+        waitUntilOnScreen(heading())
+        shot("14-reopened")
+
+        // The list of recent articles says how far each was read, and opens one at that place.
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Recently read"].waitForExistence(timeout: 10), "no reading history")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "% read")).firstMatch.exists,
+                      "the list does not say how far the article was read")
+        shot("15-how-far")
+        app.staticTexts["Photosynthesis"].firstMatch.tap()
+        waitUntilOnScreen(heading())
+        // The title bar still names the article once the page has loaded. (The web view sometimes
+        // reports a page finished before it knows its title, which used to blank the bar.)
+        XCTAssertTrue(app.navigationBars["Photosynthesis"].waitForExistence(timeout: 20), "the title bar lost the article's name")
+
+        // Left at the search screen, the app starts there.
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Recently read"].waitForExistence(timeout: 10))
+        sleep(1)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Recently read"].waitForExistence(timeout: 20), "the app did not start at the search screen")
+        XCTAssertFalse(app.buttons["Sections"].exists, "an article is showing")
     }
 
     func testDarkAppearance() throws {
