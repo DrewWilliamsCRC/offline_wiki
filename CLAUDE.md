@@ -148,9 +148,31 @@ An iPhone/iPad version that reads the same `.zim` and `.zim.idx` files.
 - `ios/project.yml` describes the Xcode project; `xcodegen generate` writes `WikiReader.xcodeproj`,
   which is git-ignored.
 
-As of 2026-11-16 the app builds and its UI tests pass in the iPhone and iPad simulators against the
-full Wikipedia file. It has **not** been installed on a real device: that needs the user's Apple ID
-signed into Xcode and a development team chosen for the target.
+As of 2026-11-16 the app builds, its UI tests pass in the iPhone and iPad simulators against the
+full Wikipedia file, and it runs on a real iPhone with that file in its Documents folder.
+
+**Look at the device before saying what it has or needs.** Unlike the e-reader, a paired iPhone or
+iPad can be inspected and installed to from the Mac, over USB or Wi-Fi:
+
+```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+xcrun devicectl list devices                         # paired devices, their ids, whether reachable
+xcrun devicectl device info apps --device <id>       # is Wiki Reader installed, and which version
+xcrun devicectl device info files --device <id> --domain-type appDataContainer \
+  --domain-identifier dev.offlinewiki.reader --subdirectory Documents     # its .zim and .zim.idx
+
+# Build for a device and install. Xcode must be signed in to an Apple developer account. The team
+# id goes on the command line, not into project.yml: this repository is public.
+cd ios && xcodegen generate
+xcodebuild -project WikiReader.xcodeproj -scheme WikiReader -configuration Release \
+  -derivedDataPath DerivedData -destination 'generic/platform=iOS' DEVELOPMENT_TEAM=<team id> build
+xcrun devicectl device install app --device <id> DerivedData/Build/Products/Release-iphoneos/WikiReader.app
+```
+
+Installing over the app keeps its Documents folder, so the 53 GB file is not copied again. Raise
+`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `ios/project.yml` for every build that goes to
+a device; otherwise the installed build cannot be told from the one before it. Installing changes
+the user's own phone, so ask first.
 
 ```sh
 cd ios && swift build -c release          # WikiCore + wikicheck; needs only the command-line tools

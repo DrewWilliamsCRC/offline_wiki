@@ -117,8 +117,8 @@ Android app's; on the full Wikipedia file the two return byte-identical articles
 results in the same order. The app has a search screen (results as you type, recently read, a
 random article) and an article view with back/forward, text size and a dark appearance.
 
-It builds and passes its tests in the iPhone and iPad simulators against the full Wikipedia file.
-It has not been installed on a real device yet.
+It passes its tests in the iPhone and iPad simulators against the full Wikipedia file, and runs on
+an iPhone with that file on board.
 
 To try it in a simulator (needs Xcode, and `brew install xcodegen`):
 
@@ -133,7 +133,23 @@ SIMCTL_CHILD_WIKI_DIR=$PWD/../data/zim xcrun simctl launch booted dev.offlinewik
 open -a Simulator
 ```
 
-On a real device the app needs the Wikipedia `.zim` and its `.zim.idx` (about 54 GB together) in
+To put it on your own iPhone or iPad, sign in to Xcode with your Apple ID (Settings, Accounts),
+pair the device with the Mac, and switch on Developer Mode on the device (Settings, Privacy &
+Security). Then build with your team's id and install:
+
+```sh
+xcrun devicectl list devices           # the device's id
+xcodebuild -project WikiReader.xcodeproj -scheme WikiReader -configuration Release \
+  -derivedDataPath DerivedData -destination 'generic/platform=iOS' \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM=<your team id> build
+xcrun devicectl device install app --device <device id> \
+  DerivedData/Build/Products/Release-iphoneos/WikiReader.app
+```
+
+With a free Apple ID the installed app stops opening after seven days and has to be installed
+again; a paid developer account makes that a year. Installing again keeps the app's files.
+
+On the device the app needs the Wikipedia `.zim` and its `.zim.idx` (about 54 GB together) in
 its own folder: connect the device, select it in the Finder, open the Files tab and drag both onto
 Wiki Reader. They can also stay on an external drive; the app asks for the folder.
 
