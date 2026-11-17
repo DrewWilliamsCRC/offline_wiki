@@ -20,6 +20,7 @@ BOOK="${WIKI_BOOK:-wikipedia_en_all}"             # wikipedia_en_ray-charles is 
 PORT="${WIKI_PORT:-8080}"                         # local preview port
 DEVICE_FOLDER="${WIKI_DEVICE_FOLDER:-Download}"    # top-level folder on the e-reader that "push" copies into
 MTP_PAUSE="${WIKI_MTP_PAUSE:-3}"                  # seconds between sessions with the e-reader (see mtp_query)
+DOWNLOADS_DIR="${WIKI_DOWNLOADS:-$HOME/Downloads}" # where "push" offers to leave the app when no e-reader answers
 SERVE_IMAGE="ghcr.io/kiwix/kiwix-serve:latest"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -386,7 +387,13 @@ cmd_push() {
     [ -f "$zim.idx" ] || die "build the search index first: ./wiki.sh index"
   fi
   stay_awake
-  folder="$(device_folder_id)"
+  # This is the first thing asked of the e-reader, so it is where having none shows: mtp_query has
+  # then said so. One thing can still be done without it, for our own app. The script ends here
+  # either way, because "update" carries on after a push as if the e-reader then had everything.
+  if ! folder="$(device_folder_id)"; then
+    if [ "${1:-}" != kiwix ] && app_to_downloads "$app"; then exit 0; fi
+    exit 1
+  fi
   [ -n "$folder" ] || die "the e-reader has no \"$DEVICE_FOLDER\" folder. Set WIKI_DEVICE_FOLDER to one of its top-level folders."
   if [ "${1:-}" != kiwix ]; then
     # Each build of the app has its own file name; earlier ones are only clutter once a newer one is sent.
@@ -405,6 +412,26 @@ cmd_push() {
   else
     echo "Then open Wiki Reader; the first time, it asks for access to files so it can read Wikipedia."
   fi
+}
+
+# What "push" offers when no e-reader answers: the app, copied to this Mac's Downloads folder, to
+# reach the e-reader some other way. The app is small enough for that; Wikipedia is not.
+# Succeeds only if the app was copied. This is the one question the script asks, and "read -p"
+# shows it only at a terminal: a run with nobody there gets no answer, which is a no, and prints
+# and does what it always has.
+app_to_downloads() { # $1 = the app
+  local name answer=""
+  name="$(basename "$1")"
+  read -r -p "Without the e-reader, the app alone can go to this Mac's Downloads folder, to be installed some other way."$'\n'"Copy $name to $DOWNLOADS_DIR? [y/N] " answer || true
+  case "$answer" in
+    [yY] | [yY][eE][sS]) ;;
+    *) return 1 ;;
+  esac
+  [ -d "$DOWNLOADS_DIR" ] || die "there is no folder $DOWNLOADS_DIR. Set WIKI_DOWNLOADS to the folder to copy into."
+  cp "$1" "$DOWNLOADS_DIR/"
+  echo "copied: $DOWNLOADS_DIR/$name"
+  echo "Get that file onto the e-reader, then tap it in the e-reader's file manager to install it."
+  echo "Wikipedia and its index still go over USB: plug the e-reader in and run ./wiki.sh push."
 }
 
 # Whether an e-reader is plugged in and answering. Unlike mtp_query this does not give up loudly:
@@ -568,7 +595,8 @@ usage: ./wiki.sh <command>
   fetch [nopic|mini|maxi]  download English Wikipedia and verify it (default: nopic; resumable)
   index                    build the title index that the Wiki Reader app searches
   app                      build the Wiki Reader app (needs a JDK and the Android SDK)
-  push                     copy Wikipedia, its index and Wiki Reader to a USB-connected e-reader (needs libmtp)
+  push                     copy Wikipedia, its index and Wiki Reader to a USB-connected e-reader (needs libmtp);
+                           if no e-reader answers, it offers to copy the app to this Mac's Downloads folder
   update                   move to Kiwix's newest snapshot: download, index, swap it onto the e-reader
   verify device            read the e-reader's copy of Wikipedia back over USB and re-check it
   status                   show what is downloaded

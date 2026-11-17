@@ -26,7 +26,7 @@ book=wikipedia_en_test
 zims="$work/data/zim"
 device="$work/device"
 kiwix="$work/kiwix"
-mkdir -p "$zims" "$work/data/app" "$device/Download" "$device/Books" "$kiwix" "$work/bin"
+mkdir -p "$zims" "$work/data/app" "$device/Download" "$device/Books" "$kiwix" "$work/bin" "$work/Downloads"
 for tool in mtp-detect mtp-folders mtp-files mtp-delfile mtp-sendfile mtp-getfile; do
   ln -s "$root/ci/fake-mtp.sh" "$work/bin/$tool"
 done
@@ -60,7 +60,7 @@ done
 # A scenario can name another book or device folder for one run: use_book=... run ...
 wiki() {
   WIKI_DATA="$work/data" WIKI_BOOK="${use_book:-$book}" WIKI_DEVICE_FOLDER="${use_folder:-Download}" \
-    WIKI_ZIM_URL="http://127.0.0.1:$port" WIKI_MTP_PAUSE=0 \
+    WIKI_ZIM_URL="http://127.0.0.1:$port" WIKI_MTP_PAUSE=0 WIKI_DOWNLOADS="$work/Downloads" \
     FAKE_MTP_DIR="$device" PATH="$work/bin:$PATH" "$root/wiki.sh" "$@"
 }
 
@@ -79,10 +79,15 @@ check() { # $1 = what should be true, the rest = a command that tests it
   fi
 }
 # Runs wiki.sh, keeping what it printed in $work/out. $1 = the exit status expected (0, or "fail").
+# Nobody is there to answer a question, unless a scenario types an answer: typed=y run ...
 run() {
   local expected="$1" status=0
   shift
-  wiki "$@" > "$work/out" 2>&1 || status=$?
+  if [ -n "${typed:-}" ]; then
+    wiki "$@" > "$work/out" 2>&1 <<< "$typed" || status=$?
+  else
+    wiki "$@" > "$work/out" 2>&1 < /dev/null || status=$?
+  fi
   checks=$((checks + 1))
   if { [ "$expected" = 0 ] && [ "$status" -eq 0 ]; } || { [ "$expected" = fail ] && [ "$status" -ne 0 ]; }; then
     echo "ok: wiki.sh $* exits $([ "$expected" = 0 ] && echo 0 || echo "with an error ($status)")"
@@ -185,7 +190,28 @@ scenario "an e-reader that is charging but not sharing files"
 : > "$device/.unplugged"
 run fail push
 check "it says how to connect" says "File transfer"
-rm -f "$device/.unplugged"
+check "nothing is put in the Mac's Downloads folder unasked" eval '[ -z "$(ls "$work/Downloads")" ]'
+
+scenario "no e-reader, and the app is wanted in the Mac's Downloads folder"
+typed=n run fail push
+check "a no leaves the folder alone" eval '[ -z "$(ls "$work/Downloads")" ]'
+typed=y run 0 push
+check "a yes puts the app there, and only the app" \
+  eval 'same "$work/data/app/$app2" "$work/Downloads/$app2" && [ "$(ls "$work/Downloads")" = "$app2" ]'
+check "it still says that the e-reader did not answer" says "File transfer"
+check "it says where the app is and what is left to do" eval 'says "copied: $work/Downloads/$app2" && says "./wiki.sh push"'
+typed=yes run 0 push
+check "asked again, the same file is simply written again" eval '[ "$(ls "$work/Downloads")" = "$app2" ]'
+mkdir -p "$work/data/apk"
+echo "kiwix" > "$work/data/apk/kiwix-1.apk"
+typed=y run fail push kiwix
+check "the offer is for Wiki Reader, not for Kiwix" eval '[ "$(ls "$work/Downloads")" = "$app2" ]'
+rm -rf "$work/data/apk"
+rm -f "$device/.unplugged" "$work/Downloads/$app2"
+sent="$(log_lines)"
+typed=y run 0 push
+check "with the e-reader there, nothing is asked or copied to the Mac" \
+  eval '[ -z "$(ls "$work/Downloads")" ] && [ "$(log_lines)" = "$sent" ]'
 
 scenario "verify device"
 run 0 verify device
