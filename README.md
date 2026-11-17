@@ -220,8 +220,9 @@ push a small build such as `wikipedia_en_top_nopic` and its `.idx` into the emul
 `/sdcard/Download`, then `adb install` the APK. The iOS app has UI tests that run in the simulator.
 
 Every pull request is built by CI, which also runs [ci/compare.sh](ci/compare.sh) on a small
-Wikipedia to check that the Kotlin and Swift code still agree. It cannot show how the apps look or
-behave, so the emulator and the UI tests remain the check for that.
+Wikipedia to check that the Kotlin and Swift code still agree, and [ci/device.sh](ci/device.sh),
+which runs `push`, `update` and `verify device` against a stand-in for the e-reader. CI cannot show
+how the apps look or behave, so the emulator and the UI tests remain the check for that.
 
 [CLAUDE.md](CLAUDE.md) has the detailed notes: the commands for all of this, how the pieces fit
 together, and the quirks of each device.

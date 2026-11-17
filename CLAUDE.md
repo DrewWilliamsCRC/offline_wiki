@@ -36,8 +36,9 @@ cd reader && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools \
 
 There is no unit test suite and no linter. Verification is done with the indexer's own commands,
 which exercise the same `core` code the app runs. `ci/compare.sh <file.zim>` runs them and their
-Swift counterparts over a set of searches and articles and fails on any difference; CI does that
-on every pull request (see Conventions).
+Swift counterparts over a set of searches and articles and fails on any difference, and
+`ci/device.sh <file.zim>` runs `push`, `update` and `verify device` against a stand-in e-reader;
+CI does both on every pull request (see Conventions).
 
 ```sh
 I=reader/indexer/build/install/indexer/bin/indexer
@@ -89,10 +90,21 @@ MTP behaviour that the script works around (keep these in mind when touching `mt
 - There is no resume and no overwrite: a partial or outdated file must be deleted, then sent again.
 - The e-reader must be in "File transfer" USB mode. In charge-only mode it is on USB (and in adb)
   but exposes no MTP interface.
+- A file listing with no files in it is asked for again, and believed only when every try says the
+  same (an e-reader with nothing on it yet). Any error text in between means "cannot talk to it".
+- The awk programs that read a listing must read all of it. One that stops at its first match
+  (`exit`) breaks the pipe on an e-reader with a few hundred files, and under `pipefail` that ends
+  the script silently with status 141.
+- A deleted file that an app still has open keeps its space. Wiki Reader therefore lets go of its
+  files whenever it is not on screen (see Architecture); `push` says so when room is short.
 
-The device half of `wiki.sh` can be tested without the e-reader by putting stand-in `mtp-detect`,
-`mtp-folders`, `mtp-files`, `mtp-delfile` and `mtp-sendfile` scripts first on `PATH`, backed by a
-directory. That is how the `update` scenarios were checked.
+The device half of `wiki.sh` is tested without the e-reader by `ci/device.sh <small file.zim>`. It
+puts `ci/fake-mtp.sh` first on `PATH` under each libmtp tool's name, backed by a folder that plays
+the e-reader, serves "Kiwix's" snapshots from a web server on this machine, and works in a scratch
+folder, so it touches neither `data/` nor the network. `wiki.sh` reads three variables for it:
+`WIKI_DATA` (where `data/` is), `WIKI_ZIM_URL` (where snapshots are listed and fetched) and
+`WIKI_MTP_PAUSE` (seconds between sessions, 3 on a real device). Add a scenario there when you
+change `push`, `update`, `verify device` or `mtp_query`, and check that it fails without the change.
 
 ## Architecture
 
@@ -271,13 +283,13 @@ Things to know:
   from the owner; force-pushes, deletion and merge commits are blocked. Work on a branch, then
   `gh pr create` and `gh pr merge --rebase --delete-branch`. Wait to be asked before opening or
   merging one.
-- **CI** (`.github/workflows/ci.yml`) runs on every pull request and on `main`. Four jobs: the
+- **CI** (`.github/workflows/ci.yml`) runs on every pull request and on `main`. Five jobs: the
   scripts parse under macOS's own bash 3.2; the Android app and indexer build; the iOS app and its
-  UI tests compile (they are not run); and `ci/compare.sh` passes on a 28 MB Wikipedia about Ray
-  Charles, fetched with `wiki.sh` and cached. It cannot show how the apps look or behave, and it
-  never touches a device: a change to a screen or a stylesheet still needs the emulator and the iOS
-  UI tests, and a change to `push` or `update` the stand-in MTP tools. A red run does not block a
-  merge unless the checks are made required in the branch protection.
+  UI tests compile (they are not run); `ci/compare.sh` passes on a 28 MB Wikipedia about Ray
+  Charles, fetched with `wiki.sh` and cached; and `ci/device.sh` passes on the same file, with a
+  stand-in for the e-reader. It cannot show how the apps look or behave, and it never touches a
+  device: a change to a screen or a stylesheet still needs the emulator and the iOS UI tests. A
+  red run does not block a merge unless the checks are made required in the branch protection.
 - **Dependabot** (`.github/dependabot.yml`) opens weekly pull requests for Gradle (`reader/`), Swift
   (`ios/`) and GitHub Actions. CI builds each one, which is not the whole check for a toolchain
   bump (see the note on checking an upgrade above); nothing auto-merges. `zstd-jni` is ignored
