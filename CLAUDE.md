@@ -102,10 +102,11 @@ MTP behaviour that the script works around (keep these in mind when touching `mt
 The device half of `wiki.sh` is tested without the e-reader by `ci/device.sh <small file.zim>`. It
 puts `ci/fake-mtp.sh` first on `PATH` under each libmtp tool's name, backed by a folder that plays
 the e-reader, serves "Kiwix's" snapshots from a web server on this machine, and works in a scratch
-folder, so it touches neither `data/` nor the network. `wiki.sh` reads three variables for it:
-`WIKI_DATA` (where `data/` is), `WIKI_ZIM_URL` (where snapshots are listed and fetched) and
-`WIKI_MTP_PAUSE` (seconds between sessions, 3 on a real device). Add a scenario there when you
-change `push`, `update`, `verify device` or `mtp_query`, and check that it fails without the change.
+folder, so it touches neither `data/` nor the network. `wiki.sh` reads four variables for it:
+`WIKI_DATA` (where `data/` is), `WIKI_ZIM_URL` (where snapshots are listed and fetched),
+`WIKI_MTP_PAUSE` (seconds between sessions, 3 on a real device) and `WIKI_DOWNLOADS` (the folder
+that is the Mac's `~/Downloads`). Add a scenario there when you change `push`, `update`,
+`verify device` or `mtp_query`, and check that it fails without the change.
 
 ## Architecture
 
@@ -285,6 +286,12 @@ Things to know:
 - The script runs under `set -euo pipefail`. Pipelines that may legitimately match nothing need
   `|| true`. Do not use a bare `wait`: `stay_awake` leaves a `caffeinate` child that only exits when
   the script does (wait for a specific PID instead).
+- **The script asks one question.** When no e-reader answers, `push` offers to copy the app alone
+  to the Mac's Downloads folder (`app_to_downloads`), and only `y` or `yes` is a yes. It asks with
+  `read -p`, which shows the question only at a terminal, so a run with nobody there prints and
+  does exactly what it did before: the error, and status 1. Anything else that asks must behave
+  the same, because downloads and transfers run unattended for hours. `ci/device.sh` types its
+  answers (`typed=y run ...`); to see the question itself, run `push` at a terminal.
 - `data/` is git-ignored. A file directly in `data/zim/` is complete and checksum-verified;
   downloads in progress live in `data/zim/partial/`. Downloaded `.zim` files are untrusted input.
 - A snapshot is 53 GB and neither the Mac nor the e-reader has room for two. `update` deletes the

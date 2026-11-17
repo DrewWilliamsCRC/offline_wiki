@@ -83,6 +83,10 @@ the e-reader awake during the big copy; it cannot resume, so an interrupted one 
 `push` sends the app that `./wiki.sh app` last built; it does not build one. After updating this
 repository, run `./wiki.sh app` again, then `push`, and install the new app as in step 3.
 
+If no e-reader answers, `push` asks whether to copy the app alone into this Mac's Downloads folder
+instead, for when you would rather get a new build onto the e-reader some other way. Wikipedia and
+its index still need the cable.
+
 This uses MTP, the ordinary Android file-transfer mode. `adb` is not used: the Viwoods AiPaper
 Reader shows up in adb but refuses its shell, install and file-transfer commands.
 
