@@ -21,6 +21,9 @@ class MainActivity : Activity() {
     private lateinit var root: FrameLayout
     private var search: SearchScreen? = null
     private var reader: ReaderScreen? = null
+    private var library: Library? = null
+    private var holding = false // whether this window is keeping the library's files open
+    private var history: History? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,13 +31,53 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
+    override fun onStart() {
+        super.onStart()
+        hold()
+    }
+
     override fun onResume() {
         super.onResume()
-        // Checked on every return to the app: the user may just have granted access in Settings.
-        if (search == null) start()
+        // Checked on every return to the app: the user may just have granted access in Settings,
+        // or copied a newer Wikipedia or its index over.
+        if (search == null || Library.changed(this)) start()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        reader?.pause()
+    }
+
+    /**
+     * Out of sight, the app lets go of the Wikipedia file, so that it can be replaced over USB:
+     * a deleted file that is still open goes on taking up its space.
+     */
+    override fun onStop() {
+        super.onStop()
+        release()
+        // The index is memory-mapped, and a mapping is only undone once its buffer is collected.
+        Runtime.getRuntime().gc()
+    }
+
+    override fun onDestroy() {
+        leave()
+        super.onDestroy()
+    }
+
+    private fun hold() {
+        if (!holding) library?.let {
+            it.hold()
+            holding = true
+        }
+    }
+
+    private fun release() {
+        if (holding) library?.release()
+        holding = false
     }
 
     private fun start() {
+        leave()
         if (!Environment.isExternalStorageManager()) {
             message(
                 "Wiki Reader needs permission to read the Wikipedia file in your Download folder.\n\n" +
@@ -56,16 +99,37 @@ class MainActivity : Activity() {
         }
         val history = History(this)
         val readerScreen = ReaderScreen(this, library, history, onBack = ::goBack, onSearch = ::showSearch)
-        val searchScreen = SearchScreen(this, library, history) { article ->
-            readerScreen.open(article.path)
+        val searchScreen = SearchScreen(this, library, history) { path, position ->
+            readerScreen.open(path, position)
             show(readerScreen.view)
         }
+        this.library = library
+        holding = true // Library.open hands it over held
+        this.history = history
         reader = readerScreen
         search = searchScreen
-        root.removeAllViews()
         root.addView(readerScreen.view, MATCH, MATCH)
         root.addView(searchScreen.view, MATCH, MATCH)
-        showSearch()
+        // Open where the app was left: on the article being read, as far down it as the reader was.
+        val last = history.list().firstOrNull()
+        if (history.reading && last != null) {
+            readerScreen.open(last.path, last.position)
+            show(readerScreen.view)
+        } else {
+            showSearch()
+        }
+    }
+
+    /** Lets go of the screens and the library, before others replace them or a notice does. */
+    private fun leave() {
+        root.removeAllViews() // a web view has to be out of the window before it is freed
+        search?.close()
+        reader?.close()
+        release()
+        search = null
+        reader = null
+        library = null
+        history = null
     }
 
     private fun askForFileAccess() {
@@ -85,6 +149,7 @@ class MainActivity : Activity() {
     private fun show(view: View) {
         search?.view?.visibility = if (view === search?.view) View.VISIBLE else View.GONE
         reader?.view?.visibility = if (view === reader?.view) View.VISIBLE else View.GONE
+        history?.reading = view === reader?.view
     }
 
     private fun readerShowing(): Boolean = reader?.view?.visibility == View.VISIBLE
@@ -117,9 +182,7 @@ class MainActivity : Activity() {
 
     /** A full-screen notice with one button, for the states where there is nothing to read yet. */
     private fun message(text: String, action: String, onAction: () -> Unit) {
-        search = null
-        reader = null
-        root.removeAllViews()
+        leave()
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER

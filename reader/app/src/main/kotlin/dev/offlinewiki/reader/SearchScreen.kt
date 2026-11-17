@@ -22,18 +22,25 @@ import android.widget.ListView
 import android.widget.TextView
 import java.util.concurrent.Executors
 
-/** The search box and its results; with an empty box it lists recently read articles instead. */
+/**
+ * The search box and its results; with an empty box it lists recently read articles instead, each
+ * with how far it was read. [open] is given an article's path and how far down it to start: where
+ * the reader left off for a recently read one, the top for a search result.
+ */
 class SearchScreen(
     private val activity: Activity,
     private val library: Library,
     private val history: History,
-    private val open: (Library.Article) -> Unit,
+    private val open: (path: String, position: Float) -> Unit,
 ) {
+    /** One line of the list. [note] is the smaller text under the title, if any. */
+    private class Row(val title: String, val path: String, val note: String?, val position: Float = 0f)
+
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     @Volatile
     private var generation = 0 // bumped on every keystroke so that slow, stale searches are dropped
-    private var rows: List<Library.Article> = emptyList()
+    private var rows: List<Row> = emptyList()
 
     private val input = EditText(activity).apply {
         hint = "Search Wikipedia"
@@ -60,11 +67,11 @@ class SearchScreen(
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val row = (convertView as? LinearLayout) ?: newRow()
-            val article = rows[position]
-            (row.getChildAt(0) as TextView).text = article.title
+            val item = rows[position]
+            (row.getChildAt(0) as TextView).text = item.title
             (row.getChildAt(1) as TextView).apply {
-                text = article.foundAs?.let { "also: $it" }
-                visibility = if (article.foundAs == null) View.GONE else View.VISIBLE
+                text = item.note
+                visibility = if (item.note == null) View.GONE else View.VISIBLE
             }
             return row
         }
@@ -105,7 +112,7 @@ class SearchScreen(
             setPadding(Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8))
             addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(
-                Ui.button(activity, "Random") { library.randomArticle()?.let(::choose) },
+                Ui.button(activity, "Random") { runCatching { library.randomArticle() }.getOrNull()?.let { choose(row(it)) } },
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
                     leftMargin = Ui.dp(activity, 8)
                 },
@@ -140,9 +147,27 @@ class SearchScreen(
 
     private fun keyboard() = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
 
-    private fun choose(article: Library.Article) {
+    /**
+     * Stops the search thread once it has finished what it is doing; for when the screen is being
+     * replaced. It is not interrupted: interrupting a thread that is reading a file closes the file
+     * for everyone else too.
+     */
+    fun close() {
+        generation++ // which makes a search that is under way give up at its next step
+        worker.shutdown()
+    }
+
+    private fun choose(row: Row) {
         keyboard().hideSoftInputFromWindow(input.windowToken, 0)
-        open(article)
+        open(row.path, row.position)
+    }
+
+    private fun row(article: Library.Article) = Row(article.title, article.path, article.foundAs?.let { "also: $it" })
+
+    /** A recently read article, which opens where the reader left it and says how far that is. */
+    private fun row(entry: History.Entry): Row {
+        val percent = (entry.position * 100).toInt()
+        return Row(entry.title, entry.path, if (percent >= 1) "$percent% read" else null, entry.position)
     }
 
     private fun schedule() {
@@ -156,22 +181,18 @@ class SearchScreen(
         val query = input.text.toString().trim()
         val mine = ++generation
         if (query.isEmpty()) {
-            val recent = history.list()
-            display(recent, when {
-                !library.hasIndex -> "No search index found next to ${library.file.name}. Build it on the Mac and copy it over."
-                recent.isEmpty() -> "Type a title to search."
-                else -> "Recently read"
-            })
+            val recent = history.list().map(::row)
+            display(recent, library.indexProblem ?: if (recent.isEmpty()) "Type a title to search." else "Recently read")
             return
         }
         worker.execute {
-            val found = runCatching { library.search(query, LIMIT) { mine != generation } }.getOrDefault(emptyList())
-            main.post { if (mine == generation) display(found, if (found.isEmpty()) "No titles match." else null) }
+            val found = runCatching { library.search(query, LIMIT) { mine != generation } }.getOrDefault(emptyList()).map(::row)
+            main.post { if (mine == generation) display(found, if (found.isEmpty()) library.indexProblem ?: "No titles match." else null) }
         }
     }
 
-    private fun display(articles: List<Library.Article>, message: String?) {
-        rows = articles
+    private fun display(found: List<Row>, message: String?) {
+        rows = found
         adapter.notifyDataSetChanged()
         list.setSelection(0)
         note.text = message

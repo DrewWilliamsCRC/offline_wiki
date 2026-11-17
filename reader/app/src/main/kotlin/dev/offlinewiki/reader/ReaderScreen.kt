@@ -63,6 +63,12 @@ class ReaderScreen(
 
     private var sections: List<ArticleSections.Section> = emptyList()
 
+    // An article being reopened where the reader left it: its path and how far down that was.
+    // Set from open() until the page has loaded, been laid out and been scrolled there.
+    private var returning: Pair<String, Float>? = null
+    private val saveSoon = Runnable { history.save() }
+    private var closed = false
+
     // The first row is the top of the article; the sections follow, indented by their level.
     private val sectionRows = object : BaseAdapter() {
         override fun getCount(): Int = sections.size + 1
@@ -125,7 +131,10 @@ class ReaderScreen(
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         webViewClient = Client()
-        setOnScrollChangeListener { _, _, _, _, _ -> showPosition() }
+        setOnScrollChangeListener { _, _, _, _, _ ->
+            showPosition()
+            notePosition()
+        }
     }
 
     val view: LinearLayout = LinearLayout(activity).apply {
@@ -155,10 +164,25 @@ class ReaderScreen(
         addView(bar)
     }
 
-    fun open(path: String) {
+    /** Shows an article, [position] of the way down it: 0 for its top, up to 1 for its end. */
+    fun open(path: String, position: Float = 0f) {
         hasPage = true
         hideSections()
+        returning = if (position > 0f) path to position else null
         web.loadUrl(urlFor(path))
+    }
+
+    /** Keeps how far the article has been read; for when the app is about to leave the screen. */
+    fun pause() {
+        web.removeCallbacks(saveSoon)
+        history.save()
+    }
+
+    /** Frees the web view; for when the screen is being replaced. */
+    fun close() {
+        pause()
+        closed = true
+        web.destroy()
     }
 
     /**
@@ -179,6 +203,7 @@ class ReaderScreen(
     /** Moves one screen down (1) or up (-1), keeping a line of overlap so the eye can find its place. */
     fun turnPage(direction: Int) {
         if (sectionsShowing()) return turnSectionsPage(direction)
+        returning = null // the reader has taken over
         val step = web.height - Ui.dp(activity, 32)
         web.scrollTo(0, (web.scrollY + direction * step).coerceIn(0, maxScroll()))
     }
@@ -220,6 +245,7 @@ class ReaderScreen(
      */
     private fun jumpTo(section: ArticleSections.Section?) {
         hideSections()
+        returning = null
         if (section == null) return web.scrollTo(0, 0)
         val page = web.url?.substringBefore('#') ?: return
         web.loadUrl(page + "#" + Uri.encode(section.id))
@@ -239,6 +265,49 @@ class ReaderScreen(
         zoom = (zoom + delta).coerceIn(ZOOMS.indices)
         web.settings.textZoom = ZOOMS[zoom]
         prefs.edit().putInt(ZOOM_KEY, zoom).apply()
+        web.postDelayed(::notePosition, 600) // the article is a different length now
+    }
+
+    /** Remembers how far down the article on screen the reader is, for reopening it there. */
+    private fun notePosition() {
+        if (closed || returning != null) return // still on its way to where it was; the top is not where the reader is
+        val path = currentPath() ?: return
+        val max = maxScroll()
+        history.setPosition(path, if (max == 0) 0f else (web.scrollY.toFloat() / max).coerceIn(0f, 1f))
+        web.removeCallbacks(saveSoon)
+        web.postDelayed(saveSoon, 1500)
+    }
+
+    /**
+     * Scrolls a reopened article to where the reader was. That can only be done once its length is
+     * known, and a page is laid out a moment after it finishes loading, a long one in several
+     * steps. So this looks again every [SETTLE_MILLIS]: it scrolls once the length has stopped
+     * changing, scrolls again if it changes after all, and is done when it has held for
+     * [SETTLE_CHECKS] looks. A reader who moves the page meanwhile is left where they went.
+     */
+    private fun settle(path: String, fraction: Float, lastHeight: Int, steady: Int, placed: Int, looks: Int) {
+        if (closed || returning?.first != path) return // another article was opened from the list meanwhile
+        if (currentPath() != path) { // the reader followed a link before this one had settled
+            returning = null
+            return
+        }
+        if (placed >= 0 && web.scrollY != placed) { // moved by hand
+            returning = null
+            return notePosition()
+        }
+        val height = web.contentHeight
+        val still = if (height > 0 && height == lastHeight) steady + 1 else 0
+        var at = placed
+        if (still == 1 || (looks >= SETTLE_LOOKS && placed < 0)) {
+            at = (fraction * maxScroll()).toInt()
+            web.scrollTo(0, at)
+        }
+        if (still >= SETTLE_CHECKS || looks >= SETTLE_LOOKS) {
+            returning = null
+            showPosition()
+            return notePosition()
+        }
+        web.postDelayed({ settle(path, fraction, height, still, at, looks + 1) }, SETTLE_MILLIS)
     }
 
     private fun urlFor(path: String): String =
@@ -281,6 +350,13 @@ class ReaderScreen(
             val path = pathOf(Uri.parse(url))
             val title = view.title
             if (path.isNotEmpty() && !title.isNullOrBlank() && title != MISSING_TITLE && path !in forwarding) history.add(path, title)
+            val back = returning
+            if (back != null && back.first == path) {
+                settle(path, back.second, lastHeight = -1, steady = 0, placed = -1, looks = 0)
+            } else {
+                returning = null
+                notePosition()
+            }
         }
     }
 
@@ -337,6 +413,9 @@ class ReaderScreen(
         const val DEFAULT_ZOOM = 2
         const val MISSING_TITLE = "Not found"
         const val TOP = "(Top)"
+        const val SETTLE_MILLIS = 150L
+        const val SETTLE_CHECKS = 6  // looks in a row with the same length before the page counts as laid out
+        const val SETTLE_LOOKS = 60  // looks before giving up waiting for that: nine seconds
         val ZOOMS = intArrayOf(85, 100, 115, 130, 150, 175, 200, 230)
         val HEAD_END = "</head>".toByteArray()
 

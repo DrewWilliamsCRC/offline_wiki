@@ -92,7 +92,11 @@ Reader shows up in adb but refuses its shell, install and file-transfer commands
 2. Open **Wiki Reader**. The first time, tap **Allow file access** and switch on "Allow access to
    manage all files", then go back. It needs this to read a file in Download.
 3. Type a title. Tap a result to read it. With the search box empty, the list is what you read
-   recently, and **Random** opens an article picked for you.
+   recently and how far you got in each; tap one to carry on from there. **Random** opens an
+   article picked for you.
+
+Closed and opened again, or restarted by the e-reader, the app returns to the article you were
+reading and the place you had reached.
 
 In an article, the bar at the bottom has Back, Search, Sections, text size (A− / A+), how far
 through the article you are, and page-turn buttons (▲ ▼). Volume and page keys turn pages too.
@@ -140,6 +144,10 @@ Things to know:
   is no Wikipedia on it during the copy (about half an hour). On the Mac the old copy is removed
   before the download whenever there is not room for both.
 - It stays with the size you already use. To switch, name one: `./wiki.sh update mini`.
+- A file that an app has open keeps its space even after it is deleted, so Wiki Reader lets go of
+  Wikipedia whenever it is not on screen. If `update` reports too little room straight after
+  removing the old snapshot, Wiki Reader is probably in front: press the e-reader's home button
+  (or restart it) and run `update` again. Back in the app, it finds the new snapshot by itself.
 
 ## Other sizes
 
