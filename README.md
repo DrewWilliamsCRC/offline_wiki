@@ -1,7 +1,7 @@
 # Offline Wikipedia for an Android e-reader
 
 All of English Wikipedia on an e-ink reader, with nothing needing a network connection once it is
-copied over. Two pieces:
+copied over. Three pieces:
 
 - **The content:** one `.zim` file published by [Kiwix](https://kiwix.org). The default is the
   `nopic` build: every article in full, without images, about 53 GB.
@@ -9,18 +9,37 @@ copied over. Two pieces:
   `.zim` file directly and searches titles through its own compact index, so results appear as you
   type. Kiwix's own app works with the same file, but its title search is slow on a low-power
   device (see [Using Kiwix instead](#using-kiwix-instead)).
+- **`./wiki.sh`:** a script for the Mac that downloads and verifies the file, builds the index and
+  the app, and copies everything to the e-reader over USB. `./wiki.sh help` lists its commands.
 
-Everything is driven by `./wiki.sh` (run `./wiki.sh help` for the list).
+There is also an [iPhone and iPad version](#iphone-and-ipad) of the reader, which uses the same
+two files.
 
-## What you need on the Mac
+What Wiki Reader does:
+
+- Finds articles by title as you type, well-known ones first, and keeps a list of what you read
+  recently.
+- Turns pages a screen at a time, with buttons or the device's page and volume keys, and has a
+  text size control and a Sections list for moving around a long article.
+- Shows articles in plain black on white with nothing animated, which is what e-ink displays
+  well. The gaps that missing pictures leave behind (empty frames, map labels, flag captions) are
+  hidden.
+- Never uses the network. The app has no internet permission.
+
+## What you need
+
+- A Mac, for `./wiki.sh`.
+- An e-reader running Android 9 or later, with about 54 GB free and USB "File transfer" (MTP).
+- These, from [Homebrew](https://brew.sh):
 
 ```sh
 brew install aria2 libmtp                         # fast downloads; USB file transfer to the e-reader
-brew install --cask temurin android-commandlinetools
-sdkmanager "platforms;android-34" "build-tools;34.0.0"
+brew install --cask temurin@21 android-commandlinetools
+sdkmanager "platforms;android-34" "build-tools;36.0.0"
 ```
 
-The last two lines are only for building Wiki Reader. `./wiki.sh serve` additionally needs Docker.
+The last two lines are only for building Wiki Reader. It needs a JDK, version 17 or newer; 21 is
+the one it is built and checked with. `./wiki.sh serve` additionally needs Docker.
 
 ## 1. Download, index, build
 
@@ -47,16 +66,20 @@ Plug the e-reader in with a USB cable, unlock it, and choose "File transfer" if 
 Files already on the e-reader are skipped, so the same command sends an updated app or index. Keep
 the e-reader awake during the big copy; it cannot resume, so an interrupted one starts over.
 
+`push` sends the app that `./wiki.sh app` last built; it does not build one. After updating this
+repository, run `./wiki.sh app` again, then `push`, and install the new app as in step 3.
+
 This uses MTP, the ordinary Android file-transfer mode. `adb` is not used: the Viwoods AiPaper
 Reader shows up in adb but refuses its shell, install and file-transfer commands.
 
 ## 3. On the e-reader
 
-1. In the file manager, open Download and tap `wiki-reader-….apk` to install it.
+1. In the file manager, open Download and tap `wiki-reader-….apk` to install it. A newer one
+   installs over the app that is there and keeps its reading history.
 2. Open **Wiki Reader**. The first time, tap **Allow file access** and switch on "Allow access to
-   manage all files", then go back. It needs this to read a file in Download; the app has no
-   internet permission.
-3. Type a title. Tap a result to read it.
+   manage all files", then go back. It needs this to read a file in Download.
+3. Type a title. Tap a result to read it. With the search box empty, the list is what you read
+   recently, and **Random** opens an article picked for you.
 
 In an article, the bar at the bottom has Back, Search, Sections, text size (A− / A+), how far
 through the article you are, and page-turn buttons (▲ ▼). Volume and page keys turn pages too.
@@ -71,7 +94,8 @@ order". Results are ranked by how well known the article is, estimated from Kiwi
 selection, article length, and how many alternative names point at it.
 
 - It searches **titles**, not article text. For full-text search, use Kiwix with the same file.
-- The `nopic` build has no images, so Wiki Reader hides the empty picture frames.
+- The `nopic` build has no images. Wiki Reader hides what they leave behind: empty picture frames,
+  the place-name labels of location maps, and captions such as "Flag" and "Coat of arms".
 - Links that leave Wikipedia cannot open; the app says so.
 
 ## Using Kiwix instead
@@ -113,16 +137,40 @@ Things to know:
 
 ## iPhone and iPad
 
-[ios/](ios/) holds the same reader as an iOS app. Its file reader and search are a Swift port of the
-Android app's; on the full Wikipedia file the two return byte-identical articles and the same search
-results in the same order. The app has a search screen (results as you type, recently read, a
-random article) and an article view with back/forward, a menu of the article's sections, text
-size and a dark appearance.
+[ios/](ios/) holds the same reader as an app for iOS 16 and later. Its file reader and search are a
+Swift port of the Android app's; on the full Wikipedia file the two return byte-identical articles
+and the same search results in the same order. The app has a search screen (results as you type,
+recently read, a random article) and an article view with back/forward, a menu of the article's
+sections, text size and a dark appearance.
 
 It passes its tests in the iPhone and iPad simulators against the full Wikipedia file, and runs on
-an iPhone with that file on board.
+an iPhone with that file on board. `./wiki.sh` does not build or install it; the steps are by hand
+and need Xcode and `brew install xcodegen`.
 
-To try it in a simulator (needs Xcode, and `brew install xcodegen`):
+**On your own iPhone or iPad.** Sign in to Xcode with your Apple ID (Settings, Accounts), pair the
+device with the Mac, and switch on Developer Mode on the device (Settings, Privacy & Security). Then
+build with your team's id and install:
+
+```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+cd ios && xcodegen generate
+xcrun devicectl list devices           # the device's id
+xcodebuild -project WikiReader.xcodeproj -scheme WikiReader -configuration Release \
+  -derivedDataPath DerivedData -destination 'generic/platform=iOS' \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM=<your team id> build
+xcrun devicectl device install app --device <device id> \
+  DerivedData/Build/Products/Release-iphoneos/WikiReader.app
+```
+
+With a free Apple ID the installed app stops opening after seven days and has to be installed
+again; a paid developer account makes that a year. Installing again keeps the app's files.
+
+The app needs the Wikipedia `.zim` and its `.zim.idx` (about 54 GB together), the same two files
+`./wiki.sh fetch` and `./wiki.sh index` produce. Connect the device, select it in the Finder, open
+the Files tab and drag both onto Wiki Reader. They can also stay on an external drive; the app asks
+for the folder.
+
+**In a simulator.** No Apple ID is needed, and the app reads the files straight from the Mac:
 
 ```sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -135,41 +183,35 @@ SIMCTL_CHILD_WIKI_DIR=$PWD/../data/zim xcrun simctl launch booted dev.offlinewik
 open -a Simulator
 ```
 
-To put it on your own iPhone or iPad, sign in to Xcode with your Apple ID (Settings, Accounts),
-pair the device with the Mac, and switch on Developer Mode on the device (Settings, Privacy &
-Security). Then build with your team's id and install:
-
-```sh
-xcrun devicectl list devices           # the device's id
-xcodebuild -project WikiReader.xcodeproj -scheme WikiReader -configuration Release \
-  -derivedDataPath DerivedData -destination 'generic/platform=iOS' \
-  -allowProvisioningUpdates DEVELOPMENT_TEAM=<your team id> build
-xcrun devicectl device install app --device <device id> \
-  DerivedData/Build/Products/Release-iphoneos/WikiReader.app
-```
-
-With a free Apple ID the installed app stops opening after seven days and has to be installed
-again; a paid developer account makes that a year. Installing again keeps the app's files.
-
-On the device the app needs the Wikipedia `.zim` and its `.zim.idx` (about 54 GB together) in
-its own folder: connect the device, select it in the Finder, open the Files tab and drag both onto
-Wiki Reader. They can also stay on an external drive; the app asks for the folder.
-
 ## Working on Wiki Reader
 
 [reader/](reader/) is a Gradle project with three modules:
 
-- `core`: reads ZIM files and searches the title index. Plain Kotlin, shared by the other two.
-- `indexer`: the command-line tool behind `./wiki.sh index`. Its `search` and `cat` commands show on
-  the Mac exactly what the app would find and display.
+- `core`: reads ZIM files, searches the title index and finds an article's sections. Plain Kotlin,
+  shared by the other two.
+- `indexer`: the command-line tool behind `./wiki.sh index`. Its `search`, `cat` and `sections`
+  commands show on the Mac exactly what the app would find and display.
 - `app`: the Android app. Plain views and a WebView; no AndroidX, no JavaScript.
 
-The app is signed with this Mac's Android debug key (`~/.android/debug.keystore`). Builds from
-another machine count as a different app, and Android will ask for the old one to be uninstalled.
+[ios/](ios/) has the same `core` code in Swift (`WikiCore`), the app, and `wikicheck`, a
+command-line tool whose `search`, `cat` and `sections` print in the same form as the indexer's. A
+change to how either side reads the file, searches or lists sections has to be made in both, and
+the two outputs compared.
+
+The Android app is signed with this Mac's Android debug key (`~/.android/debug.keystore`). Builds
+from another machine count as a different app, and Android will ask for the old one to be
+uninstalled.
 
 Since nothing can be installed or inspected on the e-reader from the Mac, test in an emulator first:
 push a small build such as `wikipedia_en_top_nopic` and its `.idx` into the emulator's
-`/sdcard/Download`, then `adb install` the APK.
+`/sdcard/Download`, then `adb install` the APK. The iOS app has UI tests that run in the simulator.
+
+Every pull request is built by CI, which also runs [ci/compare.sh](ci/compare.sh) on a small
+Wikipedia to check that the Kotlin and Swift code still agree. It cannot show how the apps look or
+behave, so the emulator and the UI tests remain the check for that.
+
+[CLAUDE.md](CLAUDE.md) has the detailed notes: the commands for all of this, how the pieces fit
+together, and the quirks of each device.
 
 ## License
 
