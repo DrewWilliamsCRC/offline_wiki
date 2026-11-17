@@ -1,45 +1,54 @@
-# Offline Wikipedia for an Android e-reader
+# Offline Wikipedia for an Android e-reader, iPhone and iPad
 
-All of English Wikipedia on an e-ink reader, with nothing needing a network connection once it is
-copied over. Three pieces:
+All of English Wikipedia on an e-ink reader, an iPhone or an iPad, with nothing needing a network
+connection once it is copied over. The pieces:
 
 - **The content:** one `.zim` file published by [Kiwix](https://kiwix.org). The default is the
   `nopic` build: every article in full, without images, about 53 GB.
-- **Wiki Reader:** a small Android app in [reader/](reader/), written for this purpose. It reads the
-  `.zim` file directly and searches titles through its own compact index, so results appear as you
-  type. Kiwix's own app works with the same file, but its title search is slow on a low-power
-  device (see [Using Kiwix instead](#using-kiwix-instead)).
+- **Wiki Reader for Android:** a small app in [reader/](reader/), written for e-ink readers. It
+  reads the `.zim` file directly and searches titles through its own compact index, so results
+  appear as you type. Kiwix's own app works with the same file, but its title search is slow on a
+  low-power device (see [Using Kiwix instead](#using-kiwix-instead)).
+- **Wiki Reader for iOS:** the same reader for iPhone and iPad, in [ios/](ios/). It uses the same
+  two files and gives the same search results (see [iPhone and iPad (iOS)](#iphone-and-ipad-ios)).
 - **`./wiki.sh`:** a script for the Mac that downloads and verifies the file, builds the index and
-  the app, and copies everything to the e-reader over USB. `./wiki.sh help` lists its commands.
+  the Android app, and copies everything to the e-reader over USB. `./wiki.sh help` lists its
+  commands. The iOS app is built and installed with Xcode's tools.
 
-There is also an [iPhone and iPad version](#iphone-and-ipad) of the reader, which uses the same
-two files.
+What Wiki Reader does on both:
 
-What Wiki Reader does:
+- Finds articles by title as you type, well-known ones first, keeps a list of what you read
+  recently, and can open an article at random.
+- Has a Sections list for moving around a long article, and a text size control.
+- Hides the gaps that missing pictures leave behind: empty frames, map labels, flag captions.
+- Reads everything from the file. Nothing is fetched from the network.
 
-- Finds articles by title as you type, well-known ones first, and keeps a list of what you read
-  recently.
-- Turns pages a screen at a time, with buttons or the device's page and volume keys, and has a
-  text size control and a Sections list for moving around a long article.
-- Shows articles in plain black on white with nothing animated, which is what e-ink displays
-  well. The gaps that missing pictures leave behind (empty frames, map labels, flag captions) are
-  hidden.
-- Never uses the network. The app has no internet permission.
+Where the two differ:
+
+- **On the e-reader** it turns pages a screen at a time, with buttons or the device's page and
+  volume keys, and shows articles in plain black on white with nothing animated, which is what
+  e-ink displays well. The app has no internet permission.
+- **On iPhone and iPad** it scrolls as usual, steps back and forward through the articles you
+  opened, and follows the system's dark appearance.
 
 ## What you need
 
 - A Mac, for `./wiki.sh`.
-- An e-reader running Android 9 or later, with about 54 GB free and USB "File transfer" (MTP).
+- A device with about 54 GB free: an e-reader running Android 9 or later that offers USB "File
+  transfer" (MTP), or an iPhone or iPad running iOS 16 or later.
 - These, from [Homebrew](https://brew.sh):
 
 ```sh
-brew install aria2 libmtp                         # fast downloads; USB file transfer to the e-reader
+brew install aria2                                # fast downloads
 brew install --cask temurin@21 android-commandlinetools
 sdkmanager "platforms;android-34" "build-tools;36.0.0"
+brew install libmtp                               # for an e-reader: USB file transfer
+brew install xcodegen                             # for iOS, along with Xcode from the App Store
 ```
 
-The last two lines are only for building Wiki Reader. It needs a JDK, version 17 or newer; 21 is
-the one it is built and checked with. `./wiki.sh serve` additionally needs Docker.
+The JDK and the Android SDK build the title index as well as the Android app, so they are needed
+for iOS too. The JDK must be version 17 or newer; 21 is the one this is built and checked with.
+`./wiki.sh serve` additionally needs Docker.
 
 ## 1. Download, index, build
 
@@ -53,6 +62,10 @@ the one it is built and checked with. `./wiki.sh serve` additionally needs Docke
 Downloads and build results land in `data/` (ignored by git). The first `index` run also downloads
 Kiwix's 3 GB "top articles" build: it is chosen by page views, and the index uses it to put
 well-known articles first.
+
+`./wiki.sh app` builds the Android app. For an iPhone or iPad, skip it: once `fetch` and `index`
+are done, continue at [iPhone and iPad (iOS)](#iphone-and-ipad-ios). Steps 2 and 3 are for the
+e-reader.
 
 ## 2. Copy to the e-reader
 
@@ -135,7 +148,7 @@ Things to know:
 ./wiki.sh fetch maxi   # with images, ~120 GB
 ```
 
-## iPhone and iPad
+## iPhone and iPad (iOS)
 
 [ios/](ios/) holds the same reader as an app for iOS 16 and later. Its file reader and search are a
 Swift port of the Android app's; on the full Wikipedia file the two return byte-identical articles
@@ -145,7 +158,7 @@ sections, text size and a dark appearance.
 
 It passes its tests in the iPhone and iPad simulators against the full Wikipedia file, and runs on
 an iPhone with that file on board. `./wiki.sh` does not build or install it; the steps are by hand
-and need Xcode and `brew install xcodegen`.
+and need Xcode and XcodeGen.
 
 **On your own iPhone or iPad.** Sign in to Xcode with your Apple ID (Settings, Accounts), pair the
 device with the Mac, and switch on Developer Mode on the device (Settings, Privacy & Security). Then
