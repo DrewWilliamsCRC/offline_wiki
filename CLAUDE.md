@@ -34,8 +34,10 @@ cd reader && ANDROID_HOME=/opt/homebrew/share/android-commandlinetools \
   ./gradlew --no-daemon -q :indexer:installDist :app:assembleRelease
 ```
 
-There is no test suite and no linter. Verification is done with the indexer's own commands, which
-exercise the same `core` code the app runs:
+There is no unit test suite and no linter. Verification is done with the indexer's own commands,
+which exercise the same `core` code the app runs. `ci/compare.sh <file.zim>` runs them and their
+Swift counterparts over a set of searches and articles and fails on any difference; CI does that
+on every pull request (see Conventions).
 
 ```sh
 I=reader/indexer/build/install/indexer/bin/indexer
@@ -206,10 +208,11 @@ Things to know:
 
 - **There are now two implementations of the index format, the search order,
   `SearchText.normalize` and `ArticleSections`.** A change to any of them in Kotlin must be mirrored
-  in Swift, then checked with the commands above. On the June 2026 file both return byte-identical
-  articles and identical results for every query tried, and the same sections for the 549 articles
-  compared across both files. The rules for sections are written out at the top of
-  `ArticleSections.kt`; keep to them exactly, down to which entities are decoded.
+  in Swift, then checked with the commands above, or all at once with `ci/compare.sh <file.zim>`
+  (`ALLOWED_NORMALIZE_DIFFERENCES=10` for the full file). On the June 2026 file both return
+  byte-identical articles and identical results for every query tried, and the same sections for
+  the 549 articles compared across both files. The rules for sections are written out at the top
+  of `ArticleSections.kt`; keep to them exactly, down to which entities are decoded.
 - `wikicheck normalize` reports ten differing titles out of 16.8 million. They are letters added to
   Unicode after the version the indexer's JVM knows; that gap cannot be closed from Swift.
 - The command-line tools alone cannot compile SwiftUI views: in this SDK `@State` is a macro whose
@@ -268,10 +271,17 @@ Things to know:
   from the owner; force-pushes, deletion and merge commits are blocked. Work on a branch, then
   `gh pr create` and `gh pr merge --rebase --delete-branch`. Wait to be asked before opening or
   merging one.
+- **CI** (`.github/workflows/ci.yml`) runs on every pull request and on `main`. Four jobs: the
+  scripts parse under macOS's own bash 3.2; the Android app and indexer build; the iOS app and its
+  UI tests compile (they are not run); and `ci/compare.sh` passes on a 28 MB Wikipedia about Ray
+  Charles, fetched with `wiki.sh` and cached. It cannot show how the apps look or behave, and it
+  never touches a device: a change to a screen or a stylesheet still needs the emulator and the iOS
+  UI tests, and a change to `push` or `update` the stand-in MTP tools. A red run does not block a
+  merge unless the checks are made required in the branch protection.
 - **Dependabot** (`.github/dependabot.yml`) opens weekly pull requests for Gradle (`reader/`), Swift
-  (`ios/`) and GitHub Actions. There is no CI that builds the apps, so build and check each one
-  locally before merging; nothing auto-merges. `zstd-jni` is ignored there on purpose (see the pin
-  above). `.github/workflows/dependency-submission.yml` reports the Gradle project's resolved
+  (`ios/`) and GitHub Actions. CI builds each one, which is not the whole check for a toolchain
+  bump (see the note on checking an upgrade above); nothing auto-merges. `zstd-jni` is ignored
+  there on purpose (see the pin above). `.github/workflows/dependency-submission.yml` reports the Gradle project's resolved
   dependencies to GitHub, which is what lets Dependabot raise security alerts for them. It reports
   shipped runtime classpaths only; widening that brings back alerts about the build plugin's own
   libraries (61 of them the first time).
