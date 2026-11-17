@@ -9,7 +9,7 @@ import WikiCore
 /// resolve unchanged. Nothing is fetched from the network; links that leave Wikipedia are handed to
 /// the system browser.
 @MainActor
-final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
+final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIScrollViewDelegate {
     @Published private(set) var title: String?
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
@@ -21,6 +21,11 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
     private let history: History
     private let server: ArticleServer
     private var opened = false
+    private var finished = false   // whether the page on screen has finished loading
+    private var titleObservation: NSKeyValueObservation?
+    /// An article being reopened where the reader left it: its path and how far down that was.
+    /// Set from `open` until the page has loaded and been scrolled there.
+    private var returning: (path: String, position: Double)?
 
     init(library: Library, history: History) {
         self.library = library
@@ -34,14 +39,21 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
         super.init()
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+        webView.scrollView.delegate = self
+        // The title is watched rather than read when a page finishes: now and then the web view
+        // says a page has finished a moment before it knows the page's title.
+        titleObservation = webView.observe(\.title) { [weak self] _, _ in
+            Task { @MainActor in self?.titleChanged() }
+        }
     }
 
-    /// Shows an article. Only the first call does anything, so that returning to the screen keeps
-    /// the reader where it was.
-    func open(_ path: String, textSize: Int) {
+    /// Shows an article, `position` of the way down it: 0 for its top, up to 1 for its end. Only
+    /// the first call does anything, so that returning to the screen keeps the reader where it was.
+    func open(_ path: String, textSize: Int, position: Double = 0) {
         guard !opened else { return }
         opened = true
         server.textSize = textSize
+        returning = position > 0 ? (path, position) : nil
         webView.load(URLRequest(url: WikiAddress.url(for: path)))
     }
 
@@ -88,18 +100,62 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         sections = []
+        finished = false // the title stays the last page's until this one's arrives
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
-        title = webView.title
+        finished = true
         showSections()
-        guard let url = webView.url, let title = webView.title, !title.isEmpty else { return }
+        titleChanged()
+        guard let url = webView.url else { return }
+        let path = WikiAddress.path(of: url)
+        guard let back = returning, back.path == path else {
+            returning = nil
+            return notePosition()
+        }
+        // The page is laid out by now, so its length is known. The height of the screen is passed
+        // in, measured as notePosition measures it, so that the page lands exactly where it was.
+        // (Both are arguments, like the id of a section, so nothing is read as script.)
+        let view = webView.scrollView
+        let visible = (view.bounds.height - view.adjustedContentInset.top - view.adjustedContentInset.bottom) / max(view.zoomScale, 0.01)
+        webView.callAsyncJavaScript(
+            "window.scrollTo(0, f * Math.max(0, document.documentElement.scrollHeight - v))",
+            arguments: ["f": back.position, "v": Double(visible)], in: nil, in: .page
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.returning = nil
+                self?.notePosition()
+            }
+        }
+    }
+
+    /// Shows the page's title once there is one and, if the page has finished loading, puts the
+    /// article in the reading history. Called when either happens, whichever comes last.
+    private func titleChanged() {
+        guard let title = webView.title, !title.isEmpty else { return }
+        self.title = title
+        guard finished, let url = webView.url else { return }
         let path = WikiAddress.path(of: url)
         if !path.isEmpty, title != ArticleServer.missingTitle, !server.isForwarding(path) {
             history.add(path: path, title: title)
         }
+    }
+
+    // MARK: UIScrollViewDelegate
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) { notePosition() }
+
+    /// Remembers how far down the article on screen the reader is, for reopening it there.
+    private func notePosition() {
+        // Not while a page is on its way to where it was: its top is not where the reader is.
+        guard returning == nil, let url = webView.url else { return }
+        let view = webView.scrollView
+        let top = -view.adjustedContentInset.top
+        let bottom = view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom
+        let fraction = bottom > top ? min(max((view.contentOffset.y - top) / (bottom - top), 0), 1) : 0
+        history.setPosition(Double(fraction), of: WikiAddress.path(of: url))
     }
 
     /// Publishes the sections of the page now showing. They were read when the page was served;

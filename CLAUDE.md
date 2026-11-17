@@ -143,6 +143,21 @@ Things that span files:
   `TitleIndex.MIN_ARTICLE_RANK`, which the forwarding pages described below fall under.
 - **The app finds its data by convention**: the largest `*.zim` in Download (or Documents) that has
   a `<name>.zim.idx` beside it, opened by path. That is why it needs "all files access".
+- **Both apps hold the files open only while on screen** (`Library.hold` and `release`, called from
+  `MainActivity.onStart`/`onStop` and from `RootView`'s scene phase). Out of sight, a read opens
+  them for just that read. Otherwise a snapshot deleted over USB would keep its 53 GB and `update`
+  could not send the new one. Coming forward, each app compares the files' names, sizes and dates
+  with what it opened (`Library.changed`, `LibraryStore.reload`) and starts afresh if they differ,
+  which is also how a newly copied index is noticed. On Android the index is memory-mapped and
+  only unmapped by the garbage collector, hence the `gc()` in `onStop`.
+- **Both apps open where they were left.** The history keeps, per article, how far down it the
+  reader was (0 to 1), and whether an article or the search screen was showing. Recently read
+  articles reopen at that place; search results open at the top. Android has no scripts, so it
+  scrolls after the page has loaded and its height has stopped changing (`ReaderScreen.settle`);
+  iOS scrolls with one script call when the page finishes.
+- **When titles cannot be searched, the search screen says why** (`Library.indexProblem`): the
+  index is missing, cut short, of another version, or built for another file. The wording for the
+  first three comes from `TitleIndex` in each language.
 - **Articles are served to the WebView** from `https://wiki.offline/<zim path>` through
   `shouldInterceptRequest`, so the articles' relative links and stylesheets resolve unchanged.
   `ReaderScreen.STYLE` is injected into each article to adapt Wikipedia's CSS for e-ink.
@@ -239,6 +254,13 @@ Things to know:
   read the Mac's disk, so `WIKI_DIR` lets the UI tests run against the real 52.7 GB file in
   `data/zim` without copying it. By hand:
   `SIMCTL_CHILD_WIKI_DIR=$PWD/data/zim xcrun simctl launch booted dev.offlinewiki.reader`.
+- **A web view can say a page has finished before it knows the page's title** (about one load in
+  nine in the iPad simulator). `WebController` therefore watches `title` and files the article in
+  the history once both have happened. Reading `webView.title` in `didFinish` blanks the title bar
+  and drops the article from the history on those loads.
+- **The UI tests start the app with `-reading NO`**, which overrides for one launch what the app
+  remembers about being inside an article. Without it every test would start where the one before
+  it stopped. `testReopensWhereTheReaderLeftOff` relaunches without it.
 - **Dark appearance in the simulator needs care.** `XCUIDevice.shared.appearance` fails quietly here
   (the test host runs `xcrun simctl` against the command-line tools), and
   `xcrun simctl ui <device> appearance dark` on a headless simulator only takes effect after

@@ -17,8 +17,9 @@ connection once it is copied over. The pieces:
 
 What Wiki Reader does on both:
 
-- Finds articles by title as you type, well-known ones first, keeps a list of what you read
-  recently, and can open an article at random.
+- Finds articles by title as you type, well-known ones first, and can open an article at random.
+- Opens where you left it: on the article you were reading, at the same place. The list of what
+  you read recently says how far you got in each, and reopens them there.
 - Has a Sections list for moving around a long article, and a text size control.
 - Hides the gaps that missing pictures leave behind: empty frames, map labels, flag captions.
 - Reads everything from the file. Nothing is fetched from the network.
@@ -162,7 +163,7 @@ Things to know:
 Swift port of the Android app's; on the full Wikipedia file the two return byte-identical articles
 and the same search results in the same order. The app has a search screen (results as you type,
 recently read, a random article) and an article view with back/forward, a menu of the article's
-sections, text size and a dark appearance.
+sections, text size and a dark appearance. Like the Android app, it opens where you left it.
 
 It passes its tests in the iPhone and iPad simulators against the full Wikipedia file, and runs on
 an iPhone with that file on board. `./wiki.sh` does not build or install it; the steps are by hand
@@ -190,6 +191,10 @@ The app needs the Wikipedia `.zim` and its `.zim.idx` (about 54 GB together), th
 `./wiki.sh fetch` and `./wiki.sh index` produce. Connect the device, select it in the Finder, open
 the Files tab and drag both onto Wiki Reader. They can also stay on an external drive; the app asks
 for the folder.
+
+To move to a newer snapshot, delete the old two files there and drag the new two in. The app lets
+go of its files while it is in the background, so the old ones' space is free for the new, and it
+picks the new ones up when it comes forward.
 
 **In a simulator.** No Apple ID is needed, and the app reads the files straight from the Mac:
 

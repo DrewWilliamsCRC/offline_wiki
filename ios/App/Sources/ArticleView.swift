@@ -2,17 +2,19 @@ import SwiftUI
 import WikiCore
 
 /// One article, with back/forward through the articles reached from it, a menu of its sections
-/// and a text size control.
+/// and a text size control. `position` is how far down it to start: 0 for the top, up to 1.
 struct ArticleView: View {
     let article: Library.Article
+    let position: Double
     @StateObject private var web: WebController
     @AppStorage("textSize") private var textSize = 100
     @State private var showingSections = false
 
     private static let sizes = [80, 90, 100, 115, 130, 150, 175, 200]
 
-    init(library: Library, article: Library.Article, history: History) {
+    init(library: Library, article: Library.Article, position: Double, history: History) {
         self.article = article
+        self.position = position
         _web = StateObject(wrappedValue: WebController(library: library, history: history))
     }
 
@@ -43,7 +45,7 @@ struct ArticleView: View {
                     web.jump(to: section)
                 }
             }
-            .onAppear { web.open(article.path, textSize: textSize) }
+            .onAppear { web.open(article.path, textSize: textSize, position: position) }
             .onChange(of: textSize) { web.setTextSize($0) }
     }
 
