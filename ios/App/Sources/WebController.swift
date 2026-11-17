@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import WebKit
+import WikiCore
 
 /// Owns the web view that shows articles and answers every request it makes from the Wikipedia file.
 ///
@@ -12,6 +13,8 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
     @Published private(set) var title: String?
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
+    /// The headings of the article on screen, for the sections menu; empty while a page loads.
+    @Published private(set) var sections: [ArticleSections.Section] = []
 
     let webView: WKWebView
     private let library: Library
@@ -50,6 +53,19 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
         webView.evaluateJavaScript("document.documentElement.style.webkitTextSizeAdjust='\(percent)%'")
     }
 
+    /// Scrolls to a section's heading, or to the top of the article for nil. This is a scroll, not
+    /// a link: it adds no step to back/forward, which stay "previous article" and "next article".
+    func jump(to section: ArticleSections.Section?) {
+        guard let section else {
+            webView.evaluateJavaScript("window.scrollTo(0, 0)")
+            return
+        }
+        // The id is passed as an argument, so nothing in it can be read as script.
+        webView.callAsyncJavaScript(
+            "document.getElementById(id)?.scrollIntoView()", arguments: ["id": section.id], in: nil, in: .page
+        ) { _ in }
+    }
+
     // MARK: WKNavigationDelegate
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
@@ -70,14 +86,35 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate {
         return .allow
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        sections = []
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
         title = webView.title
+        showSections()
         guard let url = webView.url, let title = webView.title, !title.isEmpty else { return }
         let path = WikiAddress.path(of: url)
         if !path.isEmpty, title != ArticleServer.missingTitle, !server.isForwarding(path) {
             history.add(path: path, title: title)
+        }
+    }
+
+    /// Publishes the sections of the page now showing. They were read when the page was served;
+    /// a page restored from far back in the history is read again, which is why this leaves the
+    /// main thread.
+    private func showSections() {
+        guard let url = webView.url else { return }
+        let path = WikiAddress.path(of: url)
+        let server = self.server
+        server.queue.async {
+            let found = server.sections(of: path)
+            Task { @MainActor [weak self] in
+                guard let self, let now = self.webView.url, WikiAddress.path(of: now) == path else { return }
+                self.sections = found
+            }
         }
     }
 
@@ -115,6 +152,8 @@ final class ArticleServer: NSObject {
     private var live = Set<ObjectIdentifier>()     // requests the web view still wants answered
     private var forwarding = Set<String>()
     private var shared: [String: Library.Item] = [:]
+    private var outlines: [String: [ArticleSections.Section]] = [:]   // by path, for the pages served lately
+    private var outlineOrder: [String] = []
     private var _textSize = 100
 
     init(library: Library) { self.library = library }
@@ -127,6 +166,23 @@ final class ArticleServer: NSObject {
     /// Whether a path is one of Wikipedia's tiny pages that only forward to a section of another
     /// article. There are over a million; they pass through the reader but are not "read".
     func isForwarding(_ path: String) -> Bool { lock.withLock { forwarding.contains(path) } }
+
+    /// An article's section headings: those read when it was served, or read now if that was too
+    /// long ago to have been kept.
+    func sections(of path: String) -> [ArticleSections.Section] {
+        if let kept = lock.withLock({ outlines[path] }) { return kept }
+        guard let item = try? library.item(path) else { return [] }
+        return remember(ArticleSections.parse(item.data), for: path)
+    }
+
+    @discardableResult
+    private func remember(_ sections: [ArticleSections.Section], for path: String) -> [ArticleSections.Section] {
+        lock.withLock {
+            if outlines.updateValue(sections, forKey: path) == nil { outlineOrder.append(path) }
+            while outlineOrder.count > 16 { outlines[outlineOrder.removeFirst()] = nil }
+        }
+        return sections
+    }
 
     fileprivate func begin(_ id: ObjectIdentifier) { lock.withLock { _ = live.insert(id) } }
 
@@ -146,6 +202,7 @@ final class ArticleServer: NSObject {
             if item.data.count < 2048, String(decoding: item.data, as: UTF8.self).contains("http-equiv=\"refresh\"") {
                 lock.withLock { _ = forwarding.insert(path) }
             }
+            remember(ArticleSections.parse(item.data), for: path)
             return respond(url, "text/html; charset=utf-8", withStyle(item.data), 200)
         } catch {
             return mainFrame
@@ -197,6 +254,8 @@ final class ArticleServer: NSObject {
     //  - and so is a settlement infobox's flag, seal or coat of arms without its picture, which
     //    would leave just its caption, with their whole row when nothing else is in it. A row that
     //    also holds a table (Melbourne's neighbouring places) stays;
+    //  - a jump to a section puts its heading at the top of the screen. Wikipedia's skin leaves 75px
+    //    above it for a sticky header that is not here;
     //  - a dark appearance that follows the system setting.
     private func style() -> String {
         """
@@ -212,6 +271,7 @@ final class ArticleServer: NSObject {
         .infobox tr:has(>td:only-child>.infobox-caption:only-child):has(+tr>td>.locmap,+tr>td>div>.locmap,+tr>td>div>div>.locmap,+tr>td>div>div>div>.locmap):not(:has(+tr img:not([src^="data:image/svg+xml"]))){display:none!important}
         .ib-settlement-cols-cell:not(:has(img:not([src^="data:image/svg+xml"]))){display:none!important}
         .infobox tr:has(>td.maptable):not(:has(img:not([src^="data:image/svg+xml"]),table)){display:none!important}
+        .mw-heading :is(h1,h2,h3,h4,h5,h6){scroll-margin-top:8px!important}
         table{max-width:100%!important}
         pre{white-space:pre-wrap!important}
         @media (prefers-color-scheme: dark){

@@ -1,13 +1,14 @@
 import Foundation
 import WikiCore
 
-// Compares the Swift port with the Kotlin implementation in reader/. `search` and `cat` print in
-// the same form as the Kotlin indexer's commands, so their outputs can be diffed directly.
+// Compares the Swift port with the Kotlin implementation in reader/. `search`, `cat` and `sections`
+// print in the same form as the Kotlin indexer's commands, so their outputs can be diffed directly.
 
 let usage = """
     usage:
       search <file.zim> <words>     what the app would list for a query
       cat <file.zim> <path>         an item's content (follows redirects)
+      sections <file.zim> <path>    an article's section headings: level, id and title, tab-separated
       normalize <file.zim> [step]   re-derive the index's normalized titles; every <step>th record
       bench <file.zim> <words>      time a search over 200 runs
     """
@@ -40,6 +41,12 @@ do {
     case "cat":
         guard args.count >= 3, let entry = try zim.find(namespace: "C", path: args[2]) else { fail("not found") }
         FileHandle.standardOutput.write(try zim.content(zim.resolve(entry)))
+
+    case "sections":
+        guard args.count >= 3, let entry = try zim.find(namespace: "C", path: args[2]) else { fail("not found") }
+        for section in ArticleSections.parse(try zim.content(zim.resolve(entry))) {
+            print("\(section.level)\t\(section.id)\t\(section.title)")
+        }
 
     case "normalize":
         let index = try index()

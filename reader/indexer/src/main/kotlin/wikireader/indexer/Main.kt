@@ -1,5 +1,6 @@
 package wikireader.indexer
 
+import wikireader.core.ArticleSections
 import wikireader.core.TitleIndex
 import wikireader.core.ZimFile
 import java.io.File
@@ -13,6 +14,8 @@ private const val USAGE = """usage:
                                select first) are ranked higher in search results.
   search <file.zim> <words>    search the index and print what the app would show
   cat <file.zim> <path>        print an item's content (follows redirects), e.g. cat wiki.zim Photosynthesis
+  sections <file.zim> <path>   print an article's section headings as the app's menu lists them:
+                               level, id and title, tab-separated
   info <file.zim>              print basic facts about the file"""
 
 fun main(args: Array<String>) {
@@ -32,6 +35,10 @@ fun main(args: Array<String>) {
                 val entry = zim.find('C', args.getOrNull(2) ?: fail(USAGE)) ?: fail("not found: ${args[2]}")
                 System.out.write(zim.content(zim.resolve(entry)))
                 System.out.flush()
+            }
+            "sections" -> {
+                val entry = zim.find('C', args.getOrNull(2) ?: fail(USAGE)) ?: fail("not found: ${args[2]}")
+                for (s in ArticleSections.parse(zim.content(zim.resolve(entry)))) println("${s.level}\t${s.id}\t${s.title}")
             }
             "info" -> {
                 println("entries: ${zim.entryCount}, clusters: ${zim.clusterCount}")

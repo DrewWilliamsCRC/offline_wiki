@@ -58,8 +58,9 @@ Reader shows up in adb but refuses its shell, install and file-transfer commands
    internet permission.
 3. Type a title. Tap a result to read it.
 
-In an article, the bar at the bottom has Back, Search, text size (A− / A+), how far through the
-article you are, and page-turn buttons (▲ ▼). Volume and page keys turn pages too.
+In an article, the bar at the bottom has Back, Search, Sections, text size (A− / A+), how far
+through the article you are, and page-turn buttons (▲ ▼). Volume and page keys turn pages too.
+Sections lists the article's headings; tap one to jump to it, and Back returns to where you were.
 
 ## How search works, and its limits
 
@@ -115,7 +116,8 @@ Things to know:
 [ios/](ios/) holds the same reader as an iOS app. Its file reader and search are a Swift port of the
 Android app's; on the full Wikipedia file the two return byte-identical articles and the same search
 results in the same order. The app has a search screen (results as you type, recently read, a
-random article) and an article view with back/forward, text size and a dark appearance.
+random article) and an article view with back/forward, a menu of the article's sections, text
+size and a dark appearance.
 
 It passes its tests in the iPhone and iPad simulators against the full Wikipedia file, and runs on
 an iPhone with that file on board.
