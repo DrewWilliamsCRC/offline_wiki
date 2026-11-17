@@ -41,22 +41,36 @@ class TitleIndex(file: File) : Closeable {
     data class Hit(val entryIndex: Int, val targetIndex: Int)
 
     init {
-        val h = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
-        while (h.hasRemaining()) if (channel.read(h, h.position().toLong()) < 0) break
-        require(!h.hasRemaining() && h.getInt(0) == MAGIC) { "not a title index: $file" }
-        require(h.getInt(4) == VERSION) { "title index version ${h.getInt(4)} is not supported; rebuild it" }
-        zimUuid = ByteArray(16).also { h.position(8); h.get(it) }
-        recordCount = h.getInt(24)
-        innerCount = h.getInt(28)
-        offsets = map(h.getLong(32), 4L * (recordCount + 1))
-        blob = map(h.getLong(40), h.getLong(48))
-        inner = map(h.getLong(56), INNER_SIZE.toLong() * innerCount)
-        titleRanks = Ranks(map(h.getLong(64), Ranks.size(recordCount)), recordCount)
-        innerRanks = Ranks(map(h.getLong(72), Ranks.size(innerCount)), innerCount)
+        try {
+            val h = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
+            while (h.hasRemaining()) if (channel.read(h, h.position().toLong()) < 0) break
+            require(!h.hasRemaining() && h.getInt(0) == MAGIC) { "${file.name} is not a title index" }
+            val version = h.getInt(4)
+            require(version == VERSION) {
+                // Which side is behind decides what to do about it.
+                if (version > VERSION) "${file.name} is a newer kind of index (version $version) than this reader knows (version $VERSION); install the newer reader"
+                else "${file.name} is an older kind of index (version $version) than this reader needs (version $VERSION); build it again"
+            }
+            zimUuid = ByteArray(16).also { h.position(8); h.get(it) }
+            recordCount = h.getInt(24)
+            innerCount = h.getInt(28)
+            // A copy that stopped part-way has the header of a whole index and less than all of it.
+            val size = channel.size()
+            fun section(pos: Long, length: Long): ByteBuffer {
+                require(pos >= 0 && length >= 0 && pos <= size - length) { "${file.name} is cut short; copy it again" }
+                return channel.map(FileChannel.MapMode.READ_ONLY, pos, length).order(ByteOrder.LITTLE_ENDIAN)
+            }
+            require(recordCount >= 0 && innerCount >= 0) { "${file.name} is too large for this reader" }
+            offsets = section(h.getLong(32), 4L * (recordCount + 1))
+            blob = section(h.getLong(40), h.getLong(48))
+            inner = section(h.getLong(56), INNER_SIZE.toLong() * innerCount)
+            titleRanks = Ranks(section(h.getLong(64), Ranks.size(recordCount)), recordCount)
+            innerRanks = Ranks(section(h.getLong(72), Ranks.size(innerCount)), innerCount)
+        } catch (e: Throwable) {
+            channel.close()
+            throw e
+        }
     }
-
-    private fun map(pos: Long, size: Long): ByteBuffer =
-        channel.map(FileChannel.MapMode.READ_ONLY, pos, size).order(ByteOrder.LITTLE_ENDIAN)
 
     private fun recordStart(record: Int): Int = offsets.getInt(record * 4)
     private fun titleStart(record: Int): Int = recordStart(record) + RECORD_HEADER
@@ -182,14 +196,24 @@ class TitleIndex(file: File) : Closeable {
         return false
     }
 
-    /** A record chosen at random that is an article rather than a redirect, if one turns up. */
+    /**
+     * A record chosen at random that is an article with something to read: not another name for
+     * one, and not one of the tiny pages that only forward to a section of another article (over a
+     * million of them, which the index builder ranks below [MIN_ARTICLE_RANK]). If none turns up,
+     * any article, and failing that any record.
+     */
     fun randomArticle(random: java.util.Random): Hit? {
         if (recordCount == 0) return null
-        repeat(64) {
-            val h = hit(random.nextInt(recordCount))
-            if (h.entryIndex == h.targetIndex) return h
+        var other: Hit? = null
+        repeat(RANDOM_TRIES) {
+            val record = random.nextInt(recordCount)
+            val h = hit(record)
+            if (h.entryIndex == h.targetIndex) {
+                if (titleRanks.rank(record) >= MIN_ARTICLE_RANK) return h
+                if (other == null) other = h
+            }
         }
-        return hit(random.nextInt(recordCount))
+        return other ?: hit(random.nextInt(recordCount))
     }
 
     override fun close() = channel.close()
@@ -273,6 +297,14 @@ class TitleIndex(file: File) : Closeable {
         private const val LEAD_EXACT = 3
         private const val VISITS = 600 // matches examined per step; many titles lead to the same article
         private const val FEW = 8      // below this many results, also try the words in any order
+        private const val RANDOM_TRIES = 64
+
+        /**
+         * The lowest rank the index builder gives an article with something to read. A page under
+         * 2 KB, which is what a forwarding page is, scores below this unless other names point at
+         * it (see IndexBuilder.rankArticles).
+         */
+        const val MIN_ARTICLE_RANK = 12
 
         /** The index file that belongs to a ZIM file. */
         fun fileFor(zim: File): File = File(zim.path + ".idx")

@@ -13,6 +13,7 @@ private const val USAGE = """usage:
                                also appear in the "popular" files (Kiwix's top-articles builds, most
                                select first) are ranked higher in search results.
   search <file.zim> <words>    search the index and print what the app would show
+  random <file.zim> [count]    print articles as the app's Random button would pick them
   cat <file.zim> <path>        print an item's content (follows redirects), e.g. cat wiki.zim Photosynthesis
   sections <file.zim> <path>   print an article's section headings as the app's menu lists them:
                                level, id and title, tab-separated
@@ -22,6 +23,15 @@ fun main(args: Array<String>) {
     if (args.size < 2) fail(USAGE)
     val zimFile = File(args[1])
     if (!zimFile.isFile) fail("no such file: $zimFile")
+    try {
+        run(args, zimFile)
+    } catch (e: Exception) {
+        // A file that is damaged, cut short or of the wrong kind: say which, without the stack trace.
+        fail("error: ${e.message ?: e}", status = 1)
+    }
+}
+
+private fun run(args: Array<String>, zimFile: File) {
     ZimFile(zimFile).use { zim ->
         when (args[0]) {
             "build" -> {
@@ -31,6 +41,12 @@ fun main(args: Array<String>) {
                     .build(TitleIndex.fileFor(zimFile))
             }
             "search" -> search(zim, zimFile, args.drop(2).joinToString(" "))
+            "random" -> index(zim, zimFile).use { index ->
+                val random = java.util.Random()
+                repeat(args.getOrNull(2)?.toIntOrNull() ?: 1) {
+                    index.randomArticle(random)?.let { println(zim.entry(it.targetIndex).title) }
+                }
+            }
             "cat" -> {
                 val entry = zim.find('C', args.getOrNull(2) ?: fail(USAGE)) ?: fail("not found: ${args[2]}")
                 System.out.write(zim.content(zim.resolve(entry)))
@@ -58,9 +74,17 @@ private fun articlePaths(file: File): Set<String> {
     return paths
 }
 
+/** The title index beside a ZIM file, having checked that it was built for that file. */
+private fun index(zim: ZimFile, zimFile: File): TitleIndex =
+    TitleIndex(TitleIndex.fileFor(zimFile)).also {
+        if (!it.zimUuid.contentEquals(zim.uuid)) {
+            it.close()
+            fail("the index was built for a different file")
+        }
+    }
+
 private fun search(zim: ZimFile, zimFile: File, query: String) {
-    TitleIndex(TitleIndex.fileFor(zimFile)).use { index ->
-        check(index.zimUuid.contentEquals(zim.uuid)) { "the index was built for a different file" }
+    index(zim, zimFile).use { index ->
         var hits: List<TitleIndex.Hit> = emptyList()
         val nanos = measureNanoTime { hits = index.search(query, 20) }
         for (h in hits) {
@@ -71,7 +95,7 @@ private fun search(zim: ZimFile, zimFile: File, query: String) {
     }
 }
 
-private fun fail(message: String): Nothing {
+private fun fail(message: String, status: Int = 2): Nothing {
     System.err.println(message)
-    exitProcess(2)
+    exitProcess(status)
 }

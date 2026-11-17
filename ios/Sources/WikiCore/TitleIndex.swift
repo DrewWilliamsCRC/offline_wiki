@@ -50,28 +50,34 @@ public final class TitleIndex {
         guard fd >= 0 else { throw Failure.unreadable("cannot open \(name): \(String(cString: strerror(errno)))") }
         defer { close(fd) } // the mapping outlives the descriptor
         var info = stat()
-        guard fstat(fd, &info) == 0, info.st_size >= TitleIndex.headerSize else { throw Failure.unreadable("not a title index: \(name)") }
+        guard fstat(fd, &info) == 0, info.st_size >= TitleIndex.headerSize else { throw Failure.unreadable("\(name) is not a title index") }
         let size = Int(info.st_size)
         guard let map = mmap(nil, size, PROT_READ, MAP_PRIVATE, fd, 0), map != MAP_FAILED else {
             throw Failure.unreadable("cannot map \(name): \(String(cString: strerror(errno)))")
         }
         let start = UnsafeRawPointer(map)
         func u32(_ at: Int) -> UInt32 { start.loadUnaligned(fromByteOffset: at, as: UInt32.self).littleEndian }
-        func u64(_ at: Int) -> Int { Int(start.loadUnaligned(fromByteOffset: at, as: UInt64.self).littleEndian) }
+        // A position or length in the header, or the file's size if it is too large to be either,
+        // which the check below then refuses.
+        func u64(_ at: Int) -> Int { Int(exactly: start.loadUnaligned(fromByteOffset: at, as: UInt64.self).littleEndian) ?? size }
         guard u32(0) == TitleIndex.magic else {
             munmap(map, size)
-            throw Failure.unreadable("not a title index: \(name)")
+            throw Failure.unreadable("\(name) is not a title index")
         }
         guard u32(4) == TitleIndex.version else {
             let found = u32(4)
             munmap(map, size)
-            throw Failure.unreadable("title index version \(found) is not supported; rebuild it")
+            // Which side is behind decides what to do about it.
+            throw Failure.unreadable(found > TitleIndex.version
+                ? "\(name) is a newer kind of index (version \(found)) than this reader knows (version \(TitleIndex.version)); install the newer reader"
+                : "\(name) is an older kind of index (version \(found)) than this reader needs (version \(TitleIndex.version)); build it again")
         }
         let records = Int(u32(24))
         let inners = Int(u32(28))
-        let sections = [u64(32), u64(40) + u64(48), u64(56) + TitleIndex.innerSize * inners,
-                        u64(64) + Ranks.size(records), u64(72) + Ranks.size(inners)]
-        guard sections.allSatisfy({ $0 >= 0 && $0 <= size }) else {
+        // A copy that stopped part-way has the header of a whole index and less than all of it.
+        let sections = [(u64(32), 4 * (records + 1)), (u64(40), u64(48)), (u64(56), TitleIndex.innerSize * inners),
+                        (u64(64), Ranks.size(records)), (u64(72), Ranks.size(inners))]
+        guard sections.allSatisfy({ $0.0 <= size && $0.1 <= size - $0.0 }) else {
             munmap(map, size)
             throw Failure.unreadable("\(name) is cut short; copy it again")
         }
@@ -239,14 +245,22 @@ public final class TitleIndex {
         return false
     }
 
-    /// A record chosen at random that is an article rather than a redirect, if one turns up.
+    /// A record chosen at random that is an article with something to read: not another name for
+    /// one, and not one of the tiny pages that only forward to a section of another article (over a
+    /// million of them, which the index builder ranks below `minArticleRank`). If none turns up,
+    /// any article, and failing that any record.
     public func randomArticle() -> Hit? {
         guard recordCount > 0 else { return nil }
-        for _ in 0..<64 {
-            let h = hit(Int.random(in: 0..<recordCount))
-            if h.entryIndex == h.targetIndex { return h }
+        var other: Hit?
+        for _ in 0..<TitleIndex.randomTries {
+            let record = Int.random(in: 0..<recordCount)
+            let h = hit(record)
+            if h.entryIndex == h.targetIndex {
+                if titleRanks.rank(record) >= TitleIndex.minArticleRank { return h }
+                if other == nil { other = h }
+            }
         }
-        return hit(Int.random(in: 0..<recordCount))
+        return other ?? hit(Int.random(in: 0..<recordCount))
     }
 
     /// One rank byte per position, with the maximum of every 256 and of every 65536 stored after
@@ -372,6 +386,12 @@ public final class TitleIndex {
     private static let leadExact = 3
     private static let visits = 600 // matches examined per step; many titles lead to the same article
     private static let few = 8      // below this many results, also try the words in any order
+    private static let randomTries = 64
+
+    /// The lowest rank the index builder gives an article with something to read. A page under
+    /// 2 KB, which is what a forwarding page is, scores below this unless other names point at it
+    /// (see IndexBuilder.rankArticles in reader/indexer).
+    public static let minArticleRank = 12
 
     /// The index file that belongs to a ZIM file.
     public static func file(for zim: URL) -> URL { URL(fileURLWithPath: zim.path + ".idx") }

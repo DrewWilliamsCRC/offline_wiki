@@ -134,6 +134,7 @@ class IndexBuilder(
         while (i >= 0) {
             val bytes = sizes[clusterOf[i]]?.getOrNull(blobOf[i]) ?: 0L
             // Tiny pages are stubs that only forward to a section of another article; never boost those.
+            // Their size alone scores below TitleIndex.MIN_ARTICLE_RANK, which is how Random avoids them.
             val boost = if (bytes < STUB_BYTES) 0 else TIER_BOOST[minOf(tier[i].toInt(), TIER_BOOST.size - 1)]
             if (boost > 0) perTier[tier[i].toInt()]++
             val score = boost + 7 * log2(1.0 + bytes / 1024.0) + 5 * log2(1.0 + minOf(inbound[i], 200))
