@@ -7,6 +7,7 @@ import WikiCore
 let usage = """
     usage:
       search <file.zim> <words>     what the app would list for a query
+      random <file.zim> [count]     articles as the app's random button would pick them
       cat <file.zim> <path>         an item's content (follows redirects)
       sections <file.zim> <path>    an article's section headings: level, id and title, tab-separated
       normalize <file.zim> [step]   re-derive the index's normalized titles; every <step>th record
@@ -36,6 +37,12 @@ do {
         for hit in index.search(args.dropFirst(2).joined(separator: " "), limit: 20) {
             let title = try zim.entry(hit.entryIndex).title
             print(hit.entryIndex == hit.targetIndex ? title : "\(title)  ->  \(try zim.entry(hit.targetIndex).title)")
+        }
+
+    case "random":
+        let index = try index()
+        for _ in 0..<(args.count >= 3 ? max(1, Int(args[2]) ?? 1) : 1) {
+            if let hit = index.randomArticle() { print(try zim.entry(hit.targetIndex).title) }
         }
 
     case "cat":

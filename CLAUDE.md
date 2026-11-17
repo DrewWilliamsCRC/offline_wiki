@@ -43,6 +43,7 @@ CI does both on every pull request (see Conventions).
 ```sh
 I=reader/indexer/build/install/indexer/bin/indexer
 $I search data/zim/<file>.zim <words>   # exactly what the app would list, with timing
+$I random data/zim/<file>.zim [count]   # articles as the app's Random button would pick them
 $I cat data/zim/<file>.zim <Path>       # an article's bytes (follows redirects)
 $I sections data/zim/<file>.zim <Path>  # its section headings, as the app's Sections menu lists them
 $I info data/zim/<file>.zim
@@ -138,7 +139,8 @@ Things that span files:
 - **Ranking** is decided at build time in `IndexBuilder.rankArticles`. The ZIM has no page-view
   data, so rank comes from membership of Kiwix's "top articles" build (passed to `indexer build` as
   a second file), article length, and capped inbound-redirect count. Redirect titles get a fraction
-  of their article's rank.
+  of their article's rank. Random uses the rank too: it only picks articles at or above
+  `TitleIndex.MIN_ARTICLE_RANK`, which the forwarding pages described below fall under.
 - **The app finds its data by convention**: the largest `*.zim` in Download (or Documents) that has
   a `<name>.zim.idx` beside it, opened by path. That is why it needs "all files access".
 - **Articles are served to the WebView** from `https://wiki.offline/<zim path>` through
@@ -203,6 +205,7 @@ W=ios/.build/release/wikicheck; K=reader/indexer/build/install/indexer/bin/index
 $W search <file.zim> <words>              # must equal `$K search ...` minus its last (timing) line
 $W cat <file.zim> <Path> | shasum         # must equal `$K cat ...`
 $W sections <file.zim> <Path>             # must equal `$K sections ...`
+$W random <file.zim> [count]              # random picks; not comparable, but the same rule as `$K random`
 $W normalize <file.zim> [step]            # re-derives the index's normalized titles in Swift
 
 # The app and its UI tests need Xcode itself. xcode-select points at the command-line tools on
@@ -221,10 +224,11 @@ Things to know:
 - **There are now two implementations of the index format, the search order,
   `SearchText.normalize` and `ArticleSections`.** A change to any of them in Kotlin must be mirrored
   in Swift, then checked with the commands above, or all at once with `ci/compare.sh <file.zim>`
-  (`ALLOWED_NORMALIZE_DIFFERENCES=10` for the full file). On the June 2026 file both return
-  byte-identical articles and identical results for every query tried, and the same sections for
-  the 549 articles compared across both files. The rules for sections are written out at the top
-  of `ArticleSections.kt`; keep to them exactly, down to which entities are decoded.
+  (`ALLOWED_NORMALIZE_DIFFERENCES=10` for the full file, `=1` for the "top" one). On the June 2026
+  file both return byte-identical articles and identical results for every query tried, and the
+  same sections for the 549 articles compared across both files. The rules for sections are
+  written out at the top of `ArticleSections.kt`; keep to them exactly, down to which entities
+  are decoded.
 - `wikicheck normalize` reports ten differing titles out of 16.8 million. They are letters added to
   Unicode after the version the indexer's JVM knows; that gap cannot be closed from Swift.
 - The command-line tools alone cannot compile SwiftUI views: in this SDK `@State` is a macro whose

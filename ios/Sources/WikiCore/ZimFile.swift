@@ -56,6 +56,11 @@ public final class ZimFile {
         do {
             let h = try ZimFile.readFully(descriptor, 0, ZimFile.headerSize)
             guard h.u32(0) == ZimFile.magic else { throw Failure.notZim("not a ZIM file: \(url.lastPathComponent)") }
+            // The file is untrusted input: a position past any real file is refused here, so that
+            // the arithmetic on positions further down cannot overflow.
+            guard h.u64(32) < ZimFile.maxPosition, h.u64(48) < ZimFile.maxPosition, h.u64(56) < ZimFile.maxPosition else {
+                throw Failure.corrupt("\(url.lastPathComponent) is damaged: its header points outside the file")
+            }
             let mimes = ZimFile.parseMimeTypes(try ZimFile.read(descriptor, h.u64(56), 8192))
             fd = descriptor
             uuid = Array(h[8..<24])
@@ -86,6 +91,7 @@ public final class ZimFile {
 
     /// Reads up to `length` bytes at `pos`; fewer only at the end of the file.
     private static func read(_ fd: Int32, _ pos: UInt64, _ length: Int) throws -> [UInt8] {
+        guard pos < maxPosition else { throw Failure.corrupt("the file points to \(pos), which is outside it") }
         var buffer = [UInt8](repeating: 0, count: length)
         var done = 0
         while done < length {
@@ -114,7 +120,7 @@ public final class ZimFile {
 
     /// File offset of the directory entry with this index.
     public func entryOffset(_ index: Int) throws -> UInt64 {
-        precondition(index >= 0 && index < entryCount, "entry index \(index) out of range")
+        guard index >= 0 && index < entryCount else { throw Failure.corrupt("entry index \(index) out of range") }
         return try readFully(pathPtrPos + 8 * UInt64(index), 8).u64(0)
     }
 
@@ -173,6 +179,7 @@ public final class ZimFile {
         while lo <= hi {
             let mid = (lo + hi) >> 1
             let bytes = try direntBytes(entryOffset(mid))
+            guard bytes.count >= 16 else { throw Failure.corrupt("directory entry \(mid) is cut short") }
             let c = compareKey(bytes, ns, key)
             if c == 0 { return try parseEntry(mid, bytes) }
             if c < 0 { lo = mid + 1 } else { hi = mid - 1 }
@@ -222,7 +229,7 @@ public final class ZimFile {
 
     /// The content of an item. Follow redirects with `resolve` first.
     public func content(_ entry: Entry) throws -> Data {
-        precondition(!entry.isRedirect, "\(entry.path) is a redirect")
+        guard !entry.isRedirect else { throw Failure.corrupt("\(entry.path) is a redirect") }
         let base = try clusterOffset(entry.cluster)
         let info = try readFully(base, 1)[0]
         let width = info & ZimFile.extended != 0 ? 8 : 4
@@ -231,14 +238,20 @@ public final class ZimFile {
             let o = try readFully(base + 1 + UInt64(width * entry.blob), width * 2)
             let from = width == 8 ? o.u64(0) : UInt64(o.u32(0))
             let to = width == 8 ? o.u64(8) : UInt64(o.u32(4))
-            guard to >= from, to - from <= UInt64(Int32.max) else { throw Failure.unsupported("\(entry.path) is too large to load") }
+            guard from < ZimFile.maxPosition, to >= from, to - from <= UInt64(Int32.max) else {
+                throw Failure.unsupported("\(entry.path) is too large to load")
+            }
             return Data(try readFully(base + 1 + from, Int(to - from)))
         }
         let data = try cluster(entry.cluster)
-        func offset(_ i: Int) -> Int { width == 8 ? Int(data.u64(i * 8)) : Int(data.u32(i * 4)) }
+        let outOfBounds = Failure.corrupt("blob \(entry.blob) of cluster \(entry.cluster) is out of bounds")
+        // The cluster starts with its offset table, whose first entry is the table's own size.
+        let tableSize = width == 8 ? Int(truncatingIfNeeded: data.u64(0)) : Int(data.u32(0))
+        guard (entry.blob + 2) * width <= tableSize else { throw outOfBounds }
+        func offset(_ i: Int) -> Int { width == 8 ? Int(truncatingIfNeeded: data.u64(i * 8)) : Int(data.u32(i * 4)) }
         let from = offset(entry.blob)
         let to = offset(entry.blob + 1)
-        guard from <= to, to <= data.count else { throw Failure.corrupt("blob \(entry.blob) of cluster \(entry.cluster) is out of bounds") }
+        guard from >= 0, from <= to, to <= data.count else { throw outOfBounds }
         return Data(data[from..<to])
     }
 
@@ -300,6 +313,7 @@ public final class ZimFile {
     private static let maxRedirects = 8
     private static let maxDirent = 8192
     private static let maxCluster: UInt64 = 512 * 1024 * 1024
+    private static let maxPosition: UInt64 = 1 << 60 // no file is this large; anything beyond is damage
     private static let cacheLimit = 24 * 1024 * 1024
 }
 
