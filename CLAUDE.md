@@ -24,6 +24,7 @@ published by Kiwix (the `nopic` build: every article, no images, 52.7 GB). Two t
 ./wiki.sh app             # build data/app/wiki-reader-<hash>.apk
 ./wiki.sh push            # app + index + Wikipedia to the e-reader (skips what is already there)
 ./wiki.sh update          # move to Kiwix's newest snapshot end to end
+./wiki.sh publish         # let the apps download it: index + catalog.json to the GitHub release
 bash -n wiki.sh           # the only "lint" for the script
 ```
 
@@ -102,11 +103,13 @@ MTP behaviour that the script works around (keep these in mind when touching `mt
 The device half of `wiki.sh` is tested without the e-reader by `ci/device.sh <small file.zim>`. It
 puts `ci/fake-mtp.sh` first on `PATH` under each libmtp tool's name, backed by a folder that plays
 the e-reader, serves "Kiwix's" snapshots from a web server on this machine, and works in a scratch
-folder, so it touches neither `data/` nor the network. `wiki.sh` reads four variables for it:
-`WIKI_DATA` (where `data/` is), `WIKI_ZIM_URL` (where snapshots are listed and fetched),
-`WIKI_MTP_PAUSE` (seconds between sessions, 3 on a real device) and `WIKI_DOWNLOADS` (the folder
-that is the Mac's `~/Downloads`). Add a scenario there when you change `push`, `update`,
-`verify device` or `mtp_query`, and check that it fails without the change.
+folder, so it touches neither `data/` nor the network. `publish` goes to a stand-in `gh` there,
+which keeps "GitHub's" release in a folder. `wiki.sh` reads these variables for it: `WIKI_DATA`
+(where `data/` is), `WIKI_ZIM_URL` (where snapshots are listed and fetched), `WIKI_MTP_PAUSE`
+(seconds between sessions, 3 on a real device), `WIKI_DOWNLOADS` (the folder that is the Mac's
+`~/Downloads`), and `WIKI_PUBLISH` and `WIKI_PUBLISH_REPO` (the books to publish, and where).
+Add a scenario there when you change `push`, `update`, `verify device`, `publish` or `mtp_query`,
+and check that it fails without the change.
 
 ## Architecture
 
@@ -351,8 +354,8 @@ Things to know:
 - **CI** (`.github/workflows/ci.yml`) runs on every pull request and on `main`. Five jobs: the
   scripts parse under macOS's own bash 3.2; the Android app and indexer build; the iOS app and its
   UI tests compile (they are not run); `ci/compare.sh` passes on a 28 MB Wikipedia about Ray
-  Charles, fetched with `wiki.sh` and cached; and `ci/device.sh` passes on the same file, with a
-  stand-in for the e-reader. It cannot show how the apps look or behave, and it never touches a
+  Charles, fetched with `wiki.sh` and cached; and `ci/device.sh` passes on the same file, with
+  stand-ins for the e-reader and for GitHub. It cannot show how the apps look or behave, and it never touches a
   device: a change to a screen or a stylesheet still needs the emulator and the iOS UI tests. A
   red run does not block a merge unless the checks are made required in the branch protection.
 - **Dependabot** (`.github/dependabot.yml`) opens weekly pull requests for Gradle (`reader/`), Swift

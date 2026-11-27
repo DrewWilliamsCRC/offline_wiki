@@ -1,8 +1,8 @@
 # Builds everything and checks what can be checked without a device or the 53 GB Wikipedia file:
 #
 #  - the scripts parse under macOS's own bash 3.2, the version they are written for;
-#  - wiki.sh's push, update and "verify device" do the right thing to a stand-in e-reader
-#    (ci/device.sh, which also stands in for Kiwix's download server);
+#  - wiki.sh's push, update, "verify device" and publish do the right thing to a stand-in
+#    e-reader and GitHub (ci/device.sh, which also stands in for Kiwix's download server);
 #  - the Android app and the indexer build;
 #  - the Kotlin code in reader/ and its Swift port in ios/ read a small Wikipedia identically
 #    (ci/compare.sh): search results, article bytes, sections and normalized titles;

@@ -21,6 +21,11 @@ PORT="${WIKI_PORT:-8080}"                         # local preview port
 DEVICE_FOLDER="${WIKI_DEVICE_FOLDER:-Download}"    # top-level folder on the e-reader that "push" copies into
 MTP_PAUSE="${WIKI_MTP_PAUSE:-3}"                  # seconds between sessions with the e-reader (see mtp_query)
 DOWNLOADS_DIR="${WIKI_DOWNLOADS:-$HOME/Downloads}" # where "push" offers to leave the app when no e-reader answers
+# Where "publish" puts the indexes and the catalog the apps download from. The apps have this
+# repository and tag built in (Catalog.URL in each), so a fork changes them there too.
+PUBLISH_REPO="${WIKI_PUBLISH_REPO:-DrewWilliamsCRC/offline_wiki}"
+PUBLISH_TAG="downloads"
+PUBLISH_BOOKS="${WIKI_PUBLISH:-wikipedia_en_all wikipedia_en_top}" # offered in this order
 SERVE_IMAGE="ghcr.io/kiwix/kiwix-serve:latest"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -531,6 +536,7 @@ cmd_update() {
     [ "$old" = "$ZIM_DIR/$latest" ] || rm -f "$old" "$old.idx" "$old.sha256"
   done
   echo "the e-reader is on $latest"
+  echo "To offer it in the apps' Downloads too, run ./wiki.sh publish."
 }
 
 # Read the Wikipedia file back from the e-reader and compare checksums. It streams through a pipe,
@@ -575,6 +581,106 @@ verify_device() {
   echo "the copy on the e-reader matches: checksum OK"
 }
 
+# --- What the apps can download ---------------------------------------------------------------
+
+# The words an app shows for a book, from its file name: <book>_<flavor>_<year>-<month>.zim.
+book_title() {
+  case "$1" in
+    wikipedia_en_all_*) echo "All of English Wikipedia" ;;
+    wikipedia_en_top_*) echo "English Wikipedia's best-known articles" ;;
+    *) echo "${1%_*}" ;;
+  esac
+}
+book_about() {
+  local what
+  case "$1" in
+    *_nopic_*) what="without pictures" ;;
+    *_mini_*) what="only the start of each, without pictures" ;;
+    *_maxi_*) what="with pictures" ;;
+    *) what="" ;;
+  esac
+  case "$1" in
+    wikipedia_en_all_*) echo "Every article${what:+, $what}." ;;
+    wikipedia_en_top_*) echo "The most-read articles${what:+, $what}. A quick start on a small device." ;;
+    *) echo "A Wikipedia from Kiwix${what:+, $what}." ;;
+  esac
+}
+
+# One entry of the catalog's "files": $1 = name, $2 = URL, $3 = local copy, $4 = its SHA-256.
+catalog_file() {
+  printf '        {"name": "%s", "url": "%s", "size": %s, "sha256": "%s"}' "$1" "$2" "$(size_of "$3")" "$4"
+}
+
+# Offer the newest downloaded snapshot of each book in PUBLISH_BOOKS to the apps: upload its index
+# to the GitHub release they read, with a catalog.json that lists each book's two files. The
+# Wikipedia file itself is not uploaded: the apps fetch it from Kiwix, as "fetch" does.
+cmd_publish() {
+  need gh "Install it with: brew install gh, then sign in with: gh auth login"
+  local work book zim name sum want first=yes uploaded line missing=()
+  work="$(mktemp -d)"
+  # shellcheck disable=SC2064 # expanded now: the folder is local to this function
+  trap "rm -rf '$work'" EXIT
+  : > "$work/indexes" # "<name> <sha256> <path>" for each index the catalog names
+  {
+    echo '{'
+    echo '  "format": 1,'
+    echo '  "books": ['
+  } > "$work/catalog.json"
+  for book in $PUBLISH_BOOKS; do
+    zim="$(ls "$ZIM_DIR"/"$book"_*.zim 2>/dev/null | sort | tail -1 || true)"
+    if [ -z "$zim" ] || [ ! "$zim.idx" -nt "$zim" ]; then
+      echo "skipping $book: no snapshot of it here with its index (./wiki.sh fetch, then index)"
+      continue
+    fi
+    name="$(basename "$zim")"
+    sum="$(shasum -a 256 "$zim.idx" | cut -d' ' -f1)"
+    want="$(published_sha256 "$zim")" # here, not inside the block below, where a failure would go unseen
+    echo "$name.idx $sum $zim.idx" >> "$work/indexes"
+    [ "$first" = yes ] || echo '    ,' >> "$work/catalog.json"
+    first=no
+    {
+      echo '    {'
+      printf '      "id": "%s", "title": "%s", "about": "%s",\n' "${name%_*}" "$(book_title "$name")" "$(book_about "$name")"
+      echo '      "files": ['
+      # The index first: it is small, and on its own it is harmless (each app looks for a .zim).
+      catalog_file "$name.idx" "https://github.com/$PUBLISH_REPO/releases/download/$PUBLISH_TAG/$name.idx" "$zim.idx" "$sum"
+      echo ','
+      catalog_file "$name" "$ZIM_URL/$name" "$zim" "$want"
+      echo
+      echo '      ]'
+      echo '    }'
+    } >> "$work/catalog.json"
+    echo "offering $name ($(human "$(size_of "$zim")")) and its index"
+  done
+  printf '  ]\n}\n' >> "$work/catalog.json"
+  [ "$first" = no ] || die "nothing to publish: none of $PUBLISH_BOOKS is here with its index"
+  python3 -I -m json.tool "$work/catalog.json" > /dev/null || die "the catalog came out malformed"
+
+  if ! gh release view "$PUBLISH_TAG" --repo "$PUBLISH_REPO" > /dev/null 2>&1; then
+    echo "creating the \"$PUBLISH_TAG\" release on $PUBLISH_REPO"
+    gh release create "$PUBLISH_TAG" --repo "$PUBLISH_REPO" --latest=false --title "Downloads for Wiki Reader" \
+      --notes "What the Wiki Reader apps download: catalog.json lists each Wikipedia the apps offer, with the title index built for it here. Wikipedia itself comes from Kiwix (download.kiwix.org). Content from Wikipedia, CC BY-SA 4.0. Made by ./wiki.sh publish." > /dev/null
+  fi
+  # An index is sent only if GitHub does not already hold the same bytes: the apps check each
+  # download against the checksum in the catalog.
+  uploaded="$(gh api "repos/$PUBLISH_REPO/releases/tags/$PUBLISH_TAG" --jq '.assets[] | "\(.name) \(.digest)"')"
+  while read -r line; do
+    set -- $line
+    if echo "$uploaded" | grep -qxF "$1 sha256:$2"; then
+      echo "$1 is already uploaded"
+    else
+      missing+=("$3")
+    fi
+  done < "$work/indexes"
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "uploading ${#missing[@]} index file(s); the full Wikipedia's is about 0.7 GB"
+    gh release upload "$PUBLISH_TAG" "${missing[@]}" --repo "$PUBLISH_REPO" --clobber
+  fi
+  # The catalog goes last, so that it never names an index that is not there yet.
+  gh release upload "$PUBLISH_TAG" "$work/catalog.json" --repo "$PUBLISH_REPO" --clobber
+  echo "published: https://github.com/$PUBLISH_REPO/releases/download/$PUBLISH_TAG/catalog.json"
+}
+
 cmd_status() {
   local f total
   for f in "$ZIM_DIR"/*.zim "$ZIM_DIR"/*.zim.idx "$APP_DIR"/*.apk "$APK_DIR"/*.apk; do
@@ -599,6 +705,8 @@ usage: ./wiki.sh <command>
                            if no e-reader answers, it offers to copy the app to this Mac's Downloads folder
   update                   move to Kiwix's newest snapshot: download, index, swap it onto the e-reader
   verify device            read the e-reader's copy of Wikipedia back over USB and re-check it
+  publish                  let the apps download the Wikipedia here: upload its index and a catalog
+                           to this repository's "downloads" release on GitHub (needs gh)
   status                   show what is downloaded
   verify                   re-check the downloaded Wikipedia file
   serve                    browse and search it on this Mac at http://localhost:8080 (needs Docker)
@@ -617,7 +725,7 @@ main() {
   local cmd="${1:-help}"
   [ $# -gt 0 ] && shift
   case "$cmd" in
-    fetch | index | app | apk | status | verify | serve | copy | push | update | help) "cmd_$cmd" "$@" ;;
+    fetch | index | app | apk | status | verify | serve | copy | push | update | publish | help) "cmd_$cmd" "$@" ;;
     *) cmd_help; exit 1 ;;
   esac
 }
