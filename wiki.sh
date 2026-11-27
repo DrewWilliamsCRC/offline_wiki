@@ -18,7 +18,10 @@ ZIM_URL="${WIKI_ZIM_URL:-https://download.kiwix.org/zim/wikipedia}" # ci/device.
 APK_API="https://api.github.com/repos/kiwix/kiwix-android/releases/latest"
 BOOK="${WIKI_BOOK:-wikipedia_en_all}"             # wikipedia_en_ray-charles is a small build for testing
 PORT="${WIKI_PORT:-8080}"                         # local preview port
-DEVICE_FOLDER="${WIKI_DEVICE_FOLDER:-Download}"    # top-level folder on the e-reader that "push" copies into
+# Top-level folders on the e-reader that "push" copies into: Wikipedia and its index go to the folder
+# Wiki Reader was given (it may not read Download itself), the app to Download, to tap there.
+DEVICE_FOLDER="${WIKI_DEVICE_FOLDER:-Wikipedia}"
+APP_FOLDER="${WIKI_APP_FOLDER:-Download}"
 MTP_PAUSE="${WIKI_MTP_PAUSE:-3}"                  # seconds between sessions with the e-reader (see mtp_query)
 DOWNLOADS_DIR="${WIKI_DOWNLOADS:-$HOME/Downloads}" # where "push" offers to leave the app when no e-reader answers
 # Where "publish" puts the indexes and the catalog the apps download from. The apps have this
@@ -336,8 +339,15 @@ mtp_query() {
 # The awk programs that read a query's output take the first match and keep reading to the end.
 # Stopping at the match ("exit") closes the pipe on whatever is still being written, and on an
 # e-reader with a few hundred files that ends the whole script, silently, with status 141.
-device_folder_id() {
-  mtp_query mtp-folders | awk -F'\t' -v n="$DEVICE_FOLDER" '$2 == n && !found { print $1; found = 1 }'
+device_folder_id() { # $1 = a top-level folder's name
+  mtp_query mtp-folders | awk -F'\t' -v n="$1" '$2 == n && !found { print $1; found = 1 }'
+}
+
+no_folder() { # $1 = the folder's name
+  if [ "$1" = "$DEVICE_FOLDER" ]; then
+    die "the e-reader has no \"$1\" folder. Open Wiki Reader on it and choose a folder: make one named $1 at the top of its storage. (Or set WIKI_DEVICE_FOLDER to the top-level folder you chose.)"
+  fi
+  die "the e-reader has no \"$1\" folder. Set WIKI_APP_FOLDER to one of its top-level folders."
 }
 
 # Prints "<id> <size>" if a file named $1 exists in folder id $2 on the e-reader.
@@ -389,7 +399,7 @@ push_file() {
 # ("push kiwix"). Files already there are skipped, so this is also how updates are sent.
 cmd_push() {
   need mtp-sendfile "Install it with: brew install libmtp"
-  local zim app folder
+  local zim app folder app_folder left
   zim="$(local_zim)"
   if [ "${1:-}" = kiwix ]; then
     app="$(local_apk)"
@@ -403,27 +413,37 @@ cmd_push() {
   # This is the first thing asked of the e-reader, so it is where having none shows: mtp_query has
   # then said so. One thing can still be done without it, for our own app. The script ends here
   # either way, because "update" carries on after a push as if the e-reader then had everything.
-  if ! folder="$(device_folder_id)"; then
+  if ! app_folder="$(device_folder_id "$APP_FOLDER")"; then
     if [ "${1:-}" != kiwix ] && app_to_downloads "$app"; then exit 0; fi
     exit 1
   fi
-  [ -n "$folder" ] || die "the e-reader has no \"$DEVICE_FOLDER\" folder. Set WIKI_DEVICE_FOLDER to one of its top-level folders."
+  [ -n "$app_folder" ] || no_folder "$APP_FOLDER"
+  folder="$(device_folder_id "$DEVICE_FOLDER")"
+  [ -n "$folder" ] || no_folder "$DEVICE_FOLDER"
+  # Before 1.0 the app read Wikipedia from Download, so an earlier push left it there. Moving it on
+  # the e-reader is instant; sending it again would take half an hour.
+  if [ "$app_folder" != "$folder" ] && [ -z "$(device_file "$(basename "$zim")" "$folder")" ]; then
+    left="$(device_file "$(basename "$zim")" "$app_folder")"
+    if [ "${left##* }" = "$(size_of "$zim")" ]; then
+      die "$(basename "$zim") is in $APP_FOLDER on the e-reader, from an earlier push. Move it and its .idx into the $DEVICE_FOLDER folder with the e-reader's file manager (or Wiki Reader's folder picker), then run push again."
+    fi
+  fi
   if [ "${1:-}" != kiwix ]; then
     # Each build of the app has its own file name; earlier ones are only clutter once a newer one is sent.
-    device_matching "$folder" "wiki-reader-" | while read -r id name; do
+    device_matching "$app_folder" "wiki-reader-" | while read -r id name; do
       [ "$name" = "$(basename "$app")" ] && continue
       echo "removing the older $name from the e-reader"
       mtp_query mtp-delfile -n "$id" > /dev/null < /dev/null
     done
   fi
-  push_file "$app" "$folder"
+  push_file "$app" "$app_folder"
   [ "${1:-}" = kiwix ] || push_file "$zim.idx" "$folder" mutable
   push_file "$zim" "$folder"
-  echo "done. On the e-reader, open its file manager, go to $DEVICE_FOLDER and tap $(basename "$app") to install it."
+  echo "done. On the e-reader, open its file manager, go to $APP_FOLDER and tap $(basename "$app") to install it."
   if [ "${1:-}" = kiwix ]; then
-    echo "Then open Kiwix and pick the Wikipedia file."
+    echo "Then open Kiwix and pick the Wikipedia file in $DEVICE_FOLDER."
   else
-    echo "Then open Wiki Reader; the first time, it asks for access to files so it can read Wikipedia."
+    echo "Then open Wiki Reader. The first time, it asks for a folder: choose $DEVICE_FOLDER."
   fi
 }
 
@@ -478,8 +498,8 @@ cmd_update() {
   mine="$(ls "$ZIM_DIR"/"$BOOK"_*.zim 2>/dev/null | sort | tail -1 || true)"
   if device_connected; then
     connected=yes
-    folder="$(device_folder_id)"
-    [ -n "$folder" ] || die "the e-reader has no \"$DEVICE_FOLDER\" folder. Set WIKI_DEVICE_FOLDER to one of its top-level folders."
+    folder="$(device_folder_id "$DEVICE_FOLDER")"
+    [ -n "$folder" ] || no_folder "$DEVICE_FOLDER"
     on_device="$(device_matching "$folder" "${BOOK}_" | awk '$2 ~ /\.zim$/ { print $2 }')"
   fi
   if [ -z "$flavor" ]; then
@@ -556,7 +576,7 @@ verify_device() {
   name="$(basename "$zim")"
   want="$(published_sha256 "$zim")" # before the long read, so a missing checksum is not found out after it
   stay_awake
-  found="$(device_file "$name" "$(device_folder_id)")"
+  found="$(device_file "$name" "$(device_folder_id "$DEVICE_FOLDER")")"
   [ -n "$found" ] || die "$name is not in the $DEVICE_FOLDER folder on the e-reader. Run: ./wiki.sh push"
   [ "${found##* }" = "$(size_of "$zim")" ] || die "the copy of $name on the e-reader is incomplete. Run: ./wiki.sh push"
   pipe="$(mktemp -u "${TMPDIR:-/tmp}/wiki-readback.XXXXXX")"
@@ -749,8 +769,9 @@ usage: ./wiki.sh <command>
   fetch [nopic|mini|maxi]  download English Wikipedia and verify it (default: nopic; resumable)
   index                    build the title index that the Wiki Reader app searches
   app                      build the Wiki Reader app (needs a JDK and the Android SDK)
-  push                     copy Wikipedia, its index and Wiki Reader to a USB-connected e-reader (needs libmtp);
-                           if no e-reader answers, it offers to copy the app to this Mac's Downloads folder
+  push                     copy Wikipedia and its index to Wiki Reader's folder on a USB-connected e-reader,
+                           and the app to Download (needs libmtp); if no e-reader answers, it offers to
+                           copy the app to this Mac's Downloads folder
   update                   move to Kiwix's newest snapshot: download, index, swap it onto the e-reader
   verify device            read the e-reader's copy of Wikipedia back over USB and re-check it
   publish                  let the apps download the Wikipedia here: upload its index and a catalog

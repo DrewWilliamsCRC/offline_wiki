@@ -1,15 +1,13 @@
 package dev.offlinewiki.reader
 
 import android.content.Context
-import android.os.Environment
 import wikireader.core.TitleIndex
 import wikireader.core.ZimFile
-import java.io.File
 import java.nio.channels.ClosedChannelException
 import java.util.Random
 
 /**
- * The Wikipedia file on this device and, if it can be used, the title index built for it.
+ * The Wikipedia file in the reader's [Folder] and, if it can be used, the title index built for it.
  *
  * The files are kept open only while the app is on screen. An open file keeps its space on the
  * disk even after it is deleted, so a reader that held on to Wikipedia in the background would
@@ -17,7 +15,10 @@ import java.util.Random
  * 53 GB still taken. [release] lets go when the app leaves the screen and [hold] takes hold again
  * when it returns; anything read in between opens the files for just that read.
  */
-class Library private constructor(val file: File, private val stamp: String) {
+class Library private constructor(private val folder: Folder, private val doc: Folder.Doc, private val stamp: String) {
+    /** The Wikipedia file's name. */
+    val name: String get() = doc.name
+
     private val random = Random()
     private val gate = Any()
     private var files: Files? = null // guarded by gate, like the two below
@@ -44,7 +45,7 @@ class Library private constructor(val file: File, private val stamp: String) {
     /** Runs [block] with the files open, opening them first if they are not. */
     private inline fun <T> read(block: (Files) -> T): T {
         val open = synchronized(gate) {
-            val f = files ?: openFiles(file).also {
+            val f = files ?: openFiles(folder, doc).also {
                 files = it
                 indexProblem = it.indexProblem
             }
@@ -115,63 +116,70 @@ class Library private constructor(val file: File, private val stamp: String) {
         private var current: Library? = null
 
         /**
-         * The Wikipedia file on this device, opened and held; null if there is none. While the
-         * files there are the ones it was last opened for, this is the same library as before.
+         * The Wikipedia file in the reader's folder, opened and held; null if there is none, or no
+         * folder yet. While the files there are the ones it was last opened for, this is the same
+         * library as before.
          */
         fun open(context: Context): Library? {
-            val file = findZim(context)
-            val stamp = file?.let(::stampOf)
+            val folder = Folder.chosen(context)
+            val doc = folder?.let(::findZim)
+            val stamp = doc?.let { stampOf(folder, it) }
             current?.let {
                 if (it.stamp == stamp) return it.also(Library::hold)
                 it.retire()
             }
             current = null
-            if (file == null || stamp == null) return null
-            val library = Library(file, stamp)
+            if (folder == null || doc == null || stamp == null) return null
+            val library = Library(folder, doc, stamp)
             library.hold()
             library.read { } // opened here, so that a file that cannot be opened is reported here
             return library.also { current = it }
         }
 
         /**
-         * Whether the files on this device are no longer the ones [open] last found: a newer
-         * snapshot or its index was copied over, or Wikipedia was removed.
+         * Whether the files in the folder are no longer the ones [open] last found: a newer
+         * snapshot or its index was copied over or downloaded, or Wikipedia was removed.
          */
-        fun changed(context: Context): Boolean = current?.let { it.stamp != findZim(context)?.let(::stampOf) } ?: false
+        fun changed(context: Context): Boolean {
+            val library = current ?: return false
+            val folder = Folder.chosen(context) ?: return true
+            return library.stamp != findZim(folder)?.let { stampOf(folder, it) }
+        }
 
-        private fun openFiles(file: File): Files {
-            val zim = ZimFile(file)
-            val indexFile = TitleIndex.fileFor(file)
-            if (!indexFile.isFile) {
-                return Files(zim, null, "No search index found next to ${file.name}. Build it on the Mac (./wiki.sh index) and copy it over.")
-            }
+        private fun openFiles(folder: Folder, doc: Folder.Doc): Files {
+            val zim = ZimFile(folder.channel(doc), doc.name)
+            val indexName = doc.name + ".idx"
+            val indexDoc = folder.find(indexName)
+                ?: return Files(zim, null, "No search index found next to ${doc.name}. Download it again from Downloads, or copy its .idx file into ${folder.name}.")
             val index = try {
-                TitleIndex(indexFile)
+                TitleIndex(folder.channel(indexDoc), indexName)
             } catch (e: Exception) {
                 return Files(zim, null, "Titles cannot be searched: ${e.message ?: e}.")
             }
             if (!index.zimUuid.contentEquals(zim.uuid)) { // an index built for another file would mislead
                 index.close()
-                return Files(zim, null, "Titles cannot be searched: ${indexFile.name} was built for a different Wikipedia file. Build it again on the Mac (./wiki.sh index) and copy it over.")
+                return Files(zim, null, "Titles cannot be searched: $indexName was built for a different Wikipedia file. Download it again from Downloads.")
             }
             return Files(zim, index, null)
         }
 
         /** Tells one state of the files from another: which file, and the size and date of it and its index. */
-        private fun stampOf(zim: File): String =
-            listOf(zim, TitleIndex.fileFor(zim)).joinToString("|") { "${it.path}:${it.length()}:${it.lastModified()}" }
+        private fun stampOf(folder: Folder, zim: Folder.Doc): String =
+            listOf(zim, folder.find(zim.name + ".idx")).joinToString("|") { "${it?.name}:${it?.size}:${it?.modified}" }
 
-        private fun findZim(context: Context): File? {
-            val shared = Environment.getExternalStorageDirectory()
-            val folders = listOfNotNull(File(shared, "Download"), File(shared, "Documents"), shared, context.getExternalFilesDir(null))
-            val zims = folders.flatMap { it.listFiles { f -> f.isFile && f.name.endsWith(".zim") }?.toList() ?: emptyList() }
-            // Prefer a file that has its index. Of each book only its newest snapshot counts, so
-            // that an older copy left beside an update is not read instead, even when it is bigger.
-            // Of what is left, the biggest: the fullest Wikipedia.
-            val indexed = zims.filter { TitleIndex.fileFor(it).isFile }.ifEmpty { zims }
+        /**
+         * Prefers a file that has its index. Of each book only its newest snapshot counts, so that
+         * an older copy left beside an update is not read instead, even when it is bigger. Of what
+         * is left, the biggest: the fullest Wikipedia.
+         */
+        private fun findZim(folder: Folder): Folder.Doc? {
+            val docs = folder.list()
+            val names = docs.mapTo(HashSet()) { it.name }
+            val zims = docs.filter { it.name.endsWith(".zim") }
+            val indexed = zims.filter { (it.name + ".idx") in names }.ifEmpty { zims }
             return indexed.groupBy { Snapshot.of(it.name)?.book ?: it.name }.values
                 .map { snapshots -> snapshots.maxBy { Snapshot.of(it.name)?.date ?: "" } }
-                .maxByOrNull { it.length() }
+                .maxByOrNull { it.size }
         }
     }
 }
