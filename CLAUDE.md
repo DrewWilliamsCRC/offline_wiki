@@ -371,6 +371,33 @@ Things to know:
   In the Android emulator the same is done by hand: rename a `.zim` and its `.idx` to an earlier
   date to get Update, `fallocate` a file in `/data/local/tmp` to run short of room for Replace,
   and `truncate -s <size>` on a `.part` to see the checksum refuse a damaged file.
+- **Wikipedia stays out of backups.** iOS backs up Documents and Application Support to iCloud
+  and to a computer. `LibraryStore.keepOutOfBackups` marks each `.zim` and `.zim.idx` in Documents
+  as excluded (`isExcludedFromBackup`) every time `reload` looks for files, and after a download
+  is moved into place; `Downloads.waiting` is excluded whole. The mark is an extended attribute,
+  so it changes neither the size nor the date `LibraryStore.stamp` reads (checked). A folder the
+  reader chose is theirs, and left alone.
+- **Article text follows the system's text size.** The stored `textSize` is a percent of the
+  system's body size; `ArticleView` shows the article at that times `UIFontMetrics`' scale for
+  the current Dynamic Type size (capped at 400%), and again when the setting changes. Before 0.7
+  it was a percent of WebKit's own size, so `adoptSystemTextSize` converts a stored size once
+  (`textSizeFollowsSystem`) to the step that looks the same. `simctl spawn defaults` writes a
+  settings file the app does not read; write `<container>/Library/Preferences/dev.offlinewiki.reader`
+  instead, by path.
+- **Articles are shown in WebKit's mobile mode on iPad too** (`preferredContentMode = .mobile` in
+  `WebController.init`). In the desktop mode an iPad gets by default, `-webkit-text-size-adjust`
+  does nothing, so A- / A+ never changed an iPad's text (the size test found it), and a page with
+  wide content (Paris, with its infobox) was shrunk to fit, its text smaller than other articles'.
+  An iPhone is in mobile mode anyway.
+- **The article menu** (a `ToolbarItem(.primaryAction)` in `ArticleView`) holds Find in Article,
+  the system's find bar (`isFindInteractionEnabled`), and Share and Open on Wikipedia, which use
+  `WebController.article`: the page on screen as filed in the history, nil for "Not found" and
+  forwarding pages. The address is `https://<language>.wikipedia.org/wiki/<path>`, the language
+  taken from the file's name and the path percent-encoded, "?" included. Further article actions
+  belong in this menu: the bottom bar is full.
+- **The search screen's last line says how old the copy is** ("Wikipedia as of June 2026", from
+  the file's name). Past six months it adds that a newer copy may be out and opens Downloads. It
+  never checks the catalog itself: the app uses the network only when asked.
 - **The UI tests start the app with `-reading NO`**, which overrides for one launch what the app
   remembers about being inside an article. Without it every test would start where the one before
   it stopped. `testReopensWhereTheReaderLeftOff` relaunches without it.
