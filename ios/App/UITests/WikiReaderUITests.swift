@@ -199,6 +199,20 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Sections"].exists, "an article is showing")
     }
 
+    /// The list of what can be downloaded comes from this repository's GitHub release, so this one
+    /// needs the network. DownloadUITests downloads for real.
+    func testDownloadsListsWhatCanBeDownloaded() throws {
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 15))
+        app.buttons["Downloads"].tap()
+        XCTAssertTrue(app.staticTexts["All of English Wikipedia"].waitForExistence(timeout: 30), "the list of downloads did not load")
+        XCTAssertTrue(app.staticTexts["English Wikipedia's best-known articles"].exists)
+        // WIKI_DIR is not where downloads go, so neither counts as on this device unless downloaded.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", " GB")).count >= 2, "no sizes shown")
+        shot("16-downloads")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 10), "Done did not return to the search screen")
+    }
+
     func testDarkAppearance() throws {
         // The appearance is read when the app starts, so set it and start again.
         app.terminate()

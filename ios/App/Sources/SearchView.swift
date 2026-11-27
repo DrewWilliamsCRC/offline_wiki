@@ -17,6 +17,7 @@ struct SearchView: View {
     @State private var searched = ""          // the query `results` belongs to
     @State private var stack: [Reading] = []
     @State private var started = false
+    @State private var showingDownloads = false
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
 
@@ -48,6 +49,14 @@ struct SearchView: View {
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
             .task(id: trimmed) { await search(trimmed) }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showingDownloads = true } label: { Label("Downloads", systemImage: "arrow.down.circle") }
+                }
+            }
+            .sheet(isPresented: $showingDownloads) {
+                NavigationStack { DownloadsView() }
+            }
         }
         // Open where the app was left: on the article being read, as far down it as the reader was.
         .onAppear {

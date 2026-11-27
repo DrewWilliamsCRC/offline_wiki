@@ -1,7 +1,8 @@
 # Offline Wikipedia for an Android e-reader, iPhone and iPad
 
 All of English Wikipedia on an e-ink reader, an iPhone or an iPad, with nothing needing a network
-connection once it is copied over. The pieces:
+connection once it is there. It gets there over USB from a Mac, or downloaded in the app over
+Wi-Fi. The pieces:
 
 - **The content:** one `.zim` file published by [Kiwix](https://kiwix.org). The default is the
   `nopic` build: every article in full, without images, about 53 GB.
@@ -12,8 +13,9 @@ connection once it is copied over. The pieces:
 - **Wiki Reader for iOS:** the same reader for iPhone and iPad, in [ios/](ios/). It uses the same
   two files and gives the same search results (see [iPhone and iPad (iOS)](#iphone-and-ipad-ios)).
 - **`./wiki.sh`:** a script for the Mac that downloads and verifies the file, builds the index and
-  the Android app, and copies everything to the e-reader over USB. `./wiki.sh help` lists its
-  commands. The iOS app is built and installed with Xcode's tools.
+  the Android app, and copies everything to the e-reader over USB. It also publishes the index for
+  the apps to download. `./wiki.sh help` lists its commands. The iOS app is built and installed
+  with Xcode's tools.
 
 What Wiki Reader does on both:
 
@@ -22,13 +24,15 @@ What Wiki Reader does on both:
   you read recently says how far you got in each, and reopens them there.
 - Has a Sections list for moving around a long article, and a text size control.
 - Hides the gaps that missing pictures leave behind: empty frames, map labels, flag captions.
-- Reads everything from the file. Nothing is fetched from the network.
+- Downloads Wikipedia and its index itself, over Wi-Fi, if they are not copied over (see
+  [Downloading in the app](#downloading-in-the-app)).
+- Reads everything from the file. Nothing is fetched from the network while you read.
 
 Where the two differ:
 
 - **On the e-reader** it turns pages a screen at a time, with buttons or the device's page and
   volume keys, and shows articles in plain black on white with nothing animated, which is what
-  e-ink displays well. The app has no internet permission.
+  e-ink displays well. It uses the network only on its Downloads screen.
 - **On iPhone and iPad** it scrolls as usual, steps back and forward through the articles you
   opened, and follows the system's dark appearance.
 
@@ -103,6 +107,9 @@ Reader shows up in adb but refuses its shell, install and file-transfer commands
 Closed and opened again, or restarted by the e-reader, the app returns to the article you were
 reading and the place you had reached.
 
+Without a Wikipedia in Download, the app offers to download one instead (see
+[Downloading in the app](#downloading-in-the-app)). The cable is faster.
+
 In an article, the bar at the bottom has Back, Search, Sections, text size (A− / A+), how far
 through the article you are, and page-turn buttons (▲ ▼). Volume and page keys turn pages too.
 Sections lists the article's headings; tap one to jump to it, and Back returns to where you were.
@@ -154,6 +161,28 @@ Things to know:
   removing the old snapshot, Wiki Reader is probably in front: press the e-reader's home button
   (or restart it) and run `update` again. Back in the app, it finds the new snapshot by itself.
 
+## Downloading in the app
+
+Both apps can fetch Wikipedia and its index themselves, which is how someone without this Mac gets
+them: on Android, the **Downloads** line at the end of the recently-read list, or **Download
+Wikipedia** when there is none yet; on iPhone and iPad, the download button at the top of the
+search screen, or **Download Wikipedia…** at first. They offer:
+
+- **All of English Wikipedia**: every article, without pictures, about 54 GB.
+- **English Wikipedia's best-known articles**: about 3 GB, a quick start on a small device. With
+  both, the app reads the bigger one.
+
+Wikipedia comes from Kiwix, and the index from this repository's
+[downloads](https://github.com/DrewWilliamsCRC/offline_wiki/releases/tag/downloads) release. Each
+file is checked against its SHA-256 before the app uses it. Downloads use Wi-Fi only, carry on
+with the app in the background, and pick up where they stopped if interrupted; the app checks
+first that there is room. The full Wikipedia takes an hour or more, depending on the connection;
+the small one, a few minutes.
+
+What is on offer is the snapshot on this Mac: after `./wiki.sh update` (or `fetch` and `index`),
+`./wiki.sh publish` uploads its index and the list the apps read. It needs the GitHub CLI (`gh`),
+signed in to an account that can write to this repository.
+
 ## Other sizes
 
 ```sh
@@ -177,8 +206,10 @@ and need Xcode and XcodeGen.
 [ios/scripts/testflight-upload.sh](ios/scripts/testflight-upload.sh), for internal testing only:
 the testers are people on the owner's App Store Connect team, who get an email invitation. Install
 **TestFlight** from the App Store, open the invitation and tap **Install**, and turn on Automatic
-Updates for Wiki Reader there. A TestFlight build stops opening 90 days after it was uploaded. It
-and a build installed from Xcode replace each other, and either way the app keeps its files.
+Updates for Wiki Reader there. Then open Wiki Reader and download Wikipedia in the app (see
+[Downloading in the app](#downloading-in-the-app)). A TestFlight build stops opening 90 days after
+it was uploaded. It and a build installed from Xcode replace each other, and either way the app
+keeps its files.
 
 **On your own iPhone or iPad.** Sign in to Xcode with your Apple ID (Settings, Accounts), pair the
 device with the Mac, and switch on Developer Mode on the device (Settings, Privacy & Security). Then
@@ -199,9 +230,10 @@ With a free Apple ID the installed app stops opening after seven days and has to
 again; a paid developer account makes that a year. Installing again keeps the app's files.
 
 The app needs the Wikipedia `.zim` and its `.zim.idx` (about 54 GB together), the same two files
-`./wiki.sh fetch` and `./wiki.sh index` produce. Connect the device, select it in the Finder, open
-the Files tab and drag both onto Wiki Reader. They can also stay on an external drive; the app asks
-for the folder.
+`./wiki.sh fetch` and `./wiki.sh index` produce. The simplest way is to let the app download them
+(see [Downloading in the app](#downloading-in-the-app)). From a Mac it is quicker: connect the
+device, select it in the Finder, open the Files tab and drag both onto Wiki Reader. They can also
+stay on an external drive; the app asks for the folder.
 
 To move to a newer snapshot, delete the old two files there and drag the new two in. The app lets
 go of its files while it is in the background, so the old ones' space is free for the new, and it

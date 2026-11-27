@@ -12,15 +12,20 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 
-/** The app's only window: a search screen and a reader screen, one shown at a time. */
+/**
+ * The app's only window: a search screen and a reader screen, one shown at a time, and the
+ * downloads screen over either of them, or over the notice shown while there is no Wikipedia.
+ */
 class MainActivity : Activity() {
     private lateinit var root: FrameLayout
     private var search: SearchScreen? = null
     private var reader: ReaderScreen? = null
+    private var downloads: DownloadScreen? = null
     private var library: Library? = null
     private var holding = false // whether this window is keeping the library's files open
     private var history: History? = null
@@ -39,8 +44,9 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // Checked on every return to the app: the user may just have granted access in Settings,
-        // or copied a newer Wikipedia or its index over.
-        if (search == null || Library.changed(this)) start()
+        // or copied a newer Wikipedia or its index over. Not under the downloads screen, which
+        // opens what it has downloaded when asked to.
+        if (downloads == null && (search == null || Library.changed(this))) start()
     }
 
     override fun onPause() {
@@ -94,12 +100,16 @@ class MainActivity : Activity() {
             return
         }
         if (library == null) {
-            message("No Wikipedia file found.\n\nCopy a .zim file and its .idx index into the Download folder.", "Look again", ::start)
+            message(
+                "No Wikipedia file found.\n\nDownload one over Wi-Fi, or copy a .zim file and its .idx index into the Download folder.",
+                "Download Wikipedia" to ::showDownloads,
+                "Look again" to ::start,
+            )
             return
         }
         val history = History(this)
         val readerScreen = ReaderScreen(this, library, history, onBack = ::goBack, onSearch = ::showSearch)
-        val searchScreen = SearchScreen(this, library, history) { path, position ->
+        val searchScreen = SearchScreen(this, library, history, onDownloads = ::showDownloads) { path, position ->
             readerScreen.open(path, position)
             show(readerScreen.view)
         }
@@ -123,6 +133,8 @@ class MainActivity : Activity() {
     /** Lets go of the screens and the library, before others replace them or a notice does. */
     private fun leave() {
         root.removeAllViews() // a web view has to be out of the window before it is freed
+        downloads?.close()
+        downloads = null
         search?.close()
         reader?.close()
         release()
@@ -138,6 +150,27 @@ class MainActivity : Activity() {
         } catch (e: ActivityNotFoundException) {
             startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
         }
+    }
+
+    /** Over whatever is showing; Back returns to it. Opening a download starts afresh. */
+    private fun showDownloads() {
+        if (downloads != null) return
+        currentFocus?.let { (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(it.windowToken, 0) }
+        val screen = DownloadScreen(
+            this, openWhenDone = search == null, reading = library?.file?.name, onClose = ::closeDownloads, onReady = ::start,
+        )
+        downloads = screen
+        root.addView(screen.view, MATCH, MATCH)
+    }
+
+    private fun closeDownloads() {
+        val screen = downloads ?: return
+        root.removeView(screen.view)
+        screen.close()
+        downloads = null
+        // Beneath it is either a library or the notice that there is none; for the notice, look
+        // again, in case a download has arrived.
+        if (search == null) start()
     }
 
     private fun showSearch() {
@@ -158,6 +191,7 @@ class MainActivity : Activity() {
     private fun goBack() {
         val readerScreen = reader
         when {
+            downloads != null -> closeDownloads()
             readerScreen == null -> finish()
             readerShowing() -> if (!readerScreen.back()) showSearch()
             readerScreen.hasPage -> show(readerScreen.view)
@@ -175,13 +209,15 @@ class MainActivity : Activity() {
             KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT -> -1
             else -> 0
         }
-        if (direction == 0 || !readerShowing()) return super.dispatchKeyEvent(event)
+        if (direction == 0 || !readerShowing() || downloads != null) return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN) reader?.turnPage(direction)
         return true
     }
 
-    /** A full-screen notice with one button, for the states where there is nothing to read yet. */
-    private fun message(text: String, action: String, onAction: () -> Unit) {
+    /** A full-screen notice with a button or two, for the states where there is nothing to read yet. */
+    private fun message(text: String, action: String, onAction: () -> Unit) = message(text, action to onAction)
+
+    private fun message(text: String, vararg actions: Pair<String, () -> Unit>) {
         leave()
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -192,10 +228,10 @@ class MainActivity : Activity() {
                 textSize = 20f
                 setTextColor(Color.BLACK)
             })
-            addView(
-                Ui.button(context, action, onClick = onAction),
+            for ((index, action) in actions.withIndex()) addView(
+                Ui.button(context, action.first, onClick = action.second),
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    topMargin = Ui.dp(context, 24)
+                    topMargin = Ui.dp(context, if (index == 0) 24 else 12)
                 },
             )
         }, MATCH, MATCH)

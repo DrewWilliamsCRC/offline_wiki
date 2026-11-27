@@ -3,14 +3,17 @@ import UniformTypeIdentifiers
 
 @main
 struct WikiReaderApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = LibraryStore()
     @StateObject private var history = History()
+    @StateObject private var downloads = Downloads.shared
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(store)
                 .environmentObject(history)
+                .environmentObject(downloads)
         }
     }
 }
@@ -19,6 +22,7 @@ struct WikiReaderApp: App {
 struct RootView: View {
     @EnvironmentObject private var store: LibraryStore
     @EnvironmentObject private var history: History
+    @EnvironmentObject private var downloads: Downloads
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -42,6 +46,11 @@ struct RootView: View {
             default: break
             }
         }
+        // A first Wikipedia that has just arrived is opened at once. One that arrives while
+        // another is open waits for the reader to choose Open, so as not to pull them out of it.
+        .onChange(of: downloads.arrivals) { _ in
+            if case .missing = store.state { store.reload() }
+        }
     }
 }
 
@@ -50,17 +59,21 @@ struct SetupView: View {
     let reason: String
     @EnvironmentObject private var store: LibraryStore
     @State private var choosingFolder = false
+    @State private var showingDownloads = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Wiki Reader").font(.largeTitle.bold())
                 Text(reason)
-                Text("Copy two files into this app's folder: the Wikipedia file (ending in .zim) and its index (ending in .zim.idx).")
+                Text("Download Wikipedia here, over Wi-Fi: about 3 GB for its best-known articles, 54 GB for all of it.")
+                Button("Download Wikipedia…") { showingDownloads = true }
+                    .buttonStyle(.borderedProminent)
+                Text("Or copy two files into this app's folder: the Wikipedia file (ending in .zim) and its index (ending in .zim.idx).")
                 Text("From a Mac: connect this device, select it in the Finder, open the Files tab and drag both files onto Wiki Reader.")
                 Text("They can also stay on an external drive. Connect it and choose the folder that holds them.")
                 Button("Choose a folder…") { choosingFolder = true }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                 Button("Look again") { store.reload() }
                     .buttonStyle(.bordered)
             }
@@ -69,6 +82,9 @@ struct SetupView: View {
         }
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             if case .success(let folder) = result { store.choose(folder: folder) }
+        }
+        .sheet(isPresented: $showingDownloads) {
+            NavigationStack { DownloadsView() }
         }
     }
 }
