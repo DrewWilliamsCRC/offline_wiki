@@ -128,7 +128,7 @@ Kiwix .zim ──indexer──▶ <file>.zim.idx ─┐
 - **indexer** (JVM, runs on the Mac): `IndexBuilder` holds every title in memory, ranks, sorts and
   writes the index. Needs about 3 GB of heap for full Wikipedia and takes under a minute.
 - **app** (Android): one activity swapping a `SearchScreen` and a `ReaderScreen`. Plain views and a
-  WebView; no AndroidX, no JavaScript, no internet permission.
+  WebView; no AndroidX, no JavaScript. The network is used only by the Downloads screen.
 
 Things that span files:
 
@@ -162,6 +162,30 @@ Things that span files:
 - **When titles cannot be searched, the search screen says why** (`Library.indexProblem`): the
   index is missing, cut short, of another version, or built for another file. The wording for the
   first three comes from `TitleIndex` in each language.
+- **Both apps can download Wikipedia and its index** (Downloads.kt and DownloadScreen.kt on
+  Android; Downloads.swift and DownloadsView.swift on iOS). What they offer is `catalog.json` on
+  this repository's GitHub release `downloads`, written and uploaded by `./wiki.sh publish`: each
+  book's index (uploaded there, since only this repository builds it) and its `.zim` (fetched
+  from Kiwix's own address), each with its size and SHA-256. The address is built into three
+  places that must agree: `Catalog.URL` (Kotlin), `Catalog.url` (Swift) and `PUBLISH_REPO` and
+  `PUBLISH_TAG` in `wiki.sh`. The catalog is untrusted input: each app accepts only plain
+  `.zim`/`.zim.idx` file names, HTTPS addresses and 64-hex checksums. Rules both follow:
+  - **A file is used only once it is whole and its SHA-256 matches.** Android writes
+    `Download/<name>.part`, carries a stopped one on with an HTTP range, checks it and renames it.
+    iOS uses a background `URLSession`, which carries on with the app suspended and leaves resume
+    data when stopped; a file that has arrived waits in Application Support/Downloads until it
+    is checked, then moves into Documents. Checking 53 GB takes a minute or more.
+  - **The index comes first**, the `.zim` last: an index alone is harmless, as both apps look
+    for a `.zim`, so Wikipedia appears to the app only when it is complete.
+  - **Wi-Fi only, and room checked first** (the space still needed plus 100 MB). One book at a
+    time. Nothing is deleted to make room: an older Wikipedia goes by the user's hand.
+  - Android runs the download in a foreground service (`dataSync`) with a wake lock, and the
+    screen reads `Downloads.status` every two seconds, changing only text that changed (e-ink).
+    iOS wakes through `AppDelegate`'s background-session handler.
+  - A first Wikipedia opens as soon as it arrives. One that arrives while another is open is not
+    switched to on the spot, so as not to pull the reader out of an article: the downloads
+    screen offers Open, and otherwise the app moves to it (the bigger one) the next time it comes
+    forward, as it does for files copied over.
 - **Articles are served to the WebView** from `https://wiki.offline/<zim path>` through
   `shouldInterceptRequest`, so the articles' relative links and stylesheets resolve unchanged.
   `ReaderScreen.STYLE` is injected into each article to adapt Wikipedia's CSS for e-ink.
@@ -241,12 +265,13 @@ copies the one the owner's Lighthouse Mobile app uses, on the same team.
 - **A build stops opening 90 days after its upload.** Upload a new one before then, even with no
   change.
 - **The privacy manifest** is `ios/App/PrivacyInfo.xcprivacy`. App Store Connect wants a reason for
-  each "required reason" API: it declares `UserDefaults` (`CA92.1`) and file timestamps (`C617.1`
+  each "required reason" API: it declares `UserDefaults` (`CA92.1`), file timestamps (`C617.1`
   for the Documents folder, `3B52.1` for a folder the reader picked), which `LibraryStore.stamp`
-  and the `fstat` in `TitleIndex` use. Using another such API (system boot time, disk space, the
-  active keyboards) means adding it there.
-- **`ITSAppUsesNonExemptEncryption` is `NO`** (`ios/App/Info.plist`): the app has no networking and
-  no encryption at all. Adding some means answering Apple's export questions again.
+  and the `fstat` in `TitleIndex` use, and disk space (`E174.1`), which `Downloads.start` checks.
+  Using another such API (system boot time, the active keyboards) means adding it there.
+- **`ITSAppUsesNonExemptEncryption` is `NO`** (`ios/App/Info.plist`): the only encryption is the
+  HTTPS of the downloads, through Apple's own `URLSession`, which is exempt. Adding encryption of
+  its own means answering Apple's export questions again.
 - **Not in CI.** Uploading from CI would need the API key on the runner. CI does check that the
   script parses.
 
@@ -294,6 +319,12 @@ Things to know:
   nine in the iPad simulator). `WebController` therefore watches `title` and files the article in
   the history once both have happened. Reading `webView.title` in `didFinish` blanks the title bar
   and drops the article from the history on those loads.
+- **Two UI tests use the network.** `testDownloadsListsWhatCanBeDownloaded` reads the published
+  catalog. `DownloadUITests` downloads the small book for real (about 3 GB, five minutes or more),
+  pausing, carrying on and relaunching on the way, so it runs only with `TEST_RUNNER_DOWNLOAD=1`,
+  and wants a fresh app: `xcrun simctl uninstall <simulator> dev.offlinewiki.reader` first. In
+  the Android emulator the same is done by hand; `truncate -s <size>` on a `.part` in Download
+  makes a damaged file to see the checksum refuse it.
 - **The UI tests start the app with `-reading NO`**, which overrides for one launch what the app
   remembers about being inside an article. Without it every test would start where the one before
   it stopped. `testReopensWhereTheReaderLeftOff` relaunches without it.

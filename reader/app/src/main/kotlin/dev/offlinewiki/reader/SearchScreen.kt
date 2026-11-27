@@ -25,16 +25,27 @@ import java.util.concurrent.Executors
 /**
  * The search box and its results; with an empty box it lists recently read articles instead, each
  * with how far it was read. [open] is given an article's path and how far down it to start: where
- * the reader left off for a recently read one, the top for a search result.
+ * the reader left off for a recently read one, the top for a search result. The last line of
+ * that list leads to the downloads screen, [onDownloads].
  */
 class SearchScreen(
     private val activity: Activity,
     private val library: Library,
     private val history: History,
+    private val onDownloads: () -> Unit,
     private val open: (path: String, position: Float) -> Unit,
 ) {
-    /** One line of the list. [note] is the smaller text under the title, if any. */
-    private class Row(val title: String, val path: String, val note: String?, val position: Float = 0f)
+    /**
+     * One line of the list. [note] is the smaller text under the title, if any. A line with an
+     * [action] does that instead of opening an article.
+     */
+    private class Row(
+        val title: String,
+        val path: String,
+        val note: String?,
+        val position: Float = 0f,
+        val action: (() -> Unit)? = null,
+    )
 
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -159,7 +170,19 @@ class SearchScreen(
 
     private fun choose(row: Row) {
         keyboard().hideSoftInputFromWindow(input.windowToken, 0)
-        open(row.path, row.position)
+        row.action?.invoke() ?: open(row.path, row.position)
+    }
+
+    /** The way to the downloads screen, saying how a download is getting on if one is. */
+    private fun downloadsRow(): Row {
+        val status = Downloads.status
+        val note = when {
+            status == null || status.doing == "Done" -> "Wikipedia and its index, over Wi-Fi"
+            Downloads.running -> "${status.book.title}: ${Downloads.gb(status.done)} of ${Downloads.gb(status.total)}"
+            status.problem != null -> "Stopped: ${status.problem}"
+            else -> "Paused: ${status.book.title}"
+        }
+        return Row("Downloads", "", note, action = onDownloads)
     }
 
     private fun row(article: Library.Article) = Row(article.title, article.path, article.foundAs?.let { "also: $it" })
@@ -182,7 +205,7 @@ class SearchScreen(
         val mine = ++generation
         if (query.isEmpty()) {
             val recent = history.list().map(::row)
-            display(recent, library.indexProblem ?: if (recent.isEmpty()) "Type a title to search." else "Recently read")
+            display(recent + downloadsRow(), library.indexProblem ?: if (recent.isEmpty()) "Type a title to search." else "Recently read")
             return
         }
         worker.execute {
