@@ -24,7 +24,7 @@ published by Kiwix (the `nopic` build: every article, no images, 52.7 GB). Two t
 ./wiki.sh app             # build data/app/wiki-reader-<hash>.apk
 ./wiki.sh push            # app + index + Wikipedia to the e-reader (skips what is already there)
 ./wiki.sh update          # move to Kiwix's newest snapshot end to end
-./wiki.sh publish         # let the apps download it: index + catalog.json to the GitHub release
+./wiki.sh publish         # let the apps download every size: indexes + catalog.json to the GitHub release
 bash -n wiki.sh           # the only "lint" for the script
 ```
 
@@ -169,7 +169,15 @@ Things that span files:
   from Kiwix's own address), each with its size and SHA-256. The address is built into three
   places that must agree: `Catalog.URL` (Kotlin), `Catalog.url` (Swift) and `PUBLISH_REPO` and
   `PUBLISH_TAG` in `wiki.sh`. The catalog is untrusted input: each app accepts only plain
-  `.zim`/`.zim.idx` file names, HTTPS addresses and 64-hex checksums. Rules both follow:
+  `.zim`/`.zim.idx` file names, HTTPS addresses and 64-hex checksums.
+
+  `publish` goes through `PUBLISH_BOOKS` (every English size) and offers Kiwix's newest snapshot
+  of each. Its index is the one built here, or else the one already on the release, or else the
+  snapshot is downloaded, indexed and deleted again; a size this Mac has no room to download is
+  skipped with a note. Sizes and checksums come from Kiwix, so no `.zim` has to stay here. Run it
+  again when Kiwix publishes: that is how the apps learn of updates. As of 2026-11-27 the release
+  offers four sizes; "all, introductions only" (14 GB) and "all, with pictures" (128 GB) await a
+  Mac with that much room free. Rules both apps follow:
   - **A file is used only once it is whole and its SHA-256 matches.** Android writes
     `Download/<name>.part`, carries a stopped one on with an HTTP range, checks it and renames it.
     iOS uses a background `URLSession`, which carries on with the app suspended and leaves resume

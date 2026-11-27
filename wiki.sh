@@ -25,7 +25,8 @@ DOWNLOADS_DIR="${WIKI_DOWNLOADS:-$HOME/Downloads}" # where "push" offers to leav
 # repository and tag built in (Catalog.URL in each), so a fork changes them there too.
 PUBLISH_REPO="${WIKI_PUBLISH_REPO:-DrewWilliamsCRC/offline_wiki}"
 PUBLISH_TAG="downloads"
-PUBLISH_BOOKS="${WIKI_PUBLISH:-wikipedia_en_all wikipedia_en_top}" # offered in this order
+# Every size of English Wikipedia Kiwix publishes, offered in this order: <book>_<flavor>.
+PUBLISH_BOOKS="${WIKI_PUBLISH:-wikipedia_en_all_maxi wikipedia_en_all_nopic wikipedia_en_all_mini wikipedia_en_top_maxi wikipedia_en_top_nopic wikipedia_en_top_mini}"
 SERVE_IMAGE="ghcr.io/kiwix/kiwix-serve:latest"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -36,12 +37,19 @@ on_disk() { echo $(($(stat -f %b "$1") * 512)); } # bytes actually stored; parti
 free_in() { df -Pk "$1" | awk 'NR==2 { printf "%.0f", $4 * 1024 }'; }
 human() { awk -v b="$1" 'BEGIN { if (b >= 1e9) printf "%.1f GB", b / 1e9; else printf "%.0f MB", b / 1e6 }'; }
 
-latest_zim() { # $1 = flavor; newest snapshot listed on the Kiwix download page, or nothing if none is
+latest_zim() { latest_of "${BOOK}_$1"; } # $1 = flavor
+
+latest_of() { # $1 = <book>_<flavor>; newest snapshot listed on the Kiwix download page, or nothing
   local listing
   listing="$(fetch_text "$ZIM_URL/")" || die "could not read the list of files at $ZIM_URL"
   # "|| true": a book or flavor Kiwix does not publish matches nothing, which the caller reports.
   echo "$listing" | grep -oE 'href="[^"]+"' | sed -E 's/^href="//; s/"$//' |
-    grep -E "^${BOOK}_$1_[0-9]{4}-[0-9]{2}\.zim$" | sort | tail -1 || true
+    grep -E "^$1_[0-9]{4}-[0-9]{2}\.zim$" | sort | tail -1 || true
+}
+
+# Size in bytes of a file Kiwix publishes, from its metalink; nothing if that cannot be had.
+published_size() { # $1 = file name
+  fetch_text "$ZIM_URL/$1.meta4" | sed -nE 's/.*<size>([0-9]+)<\/size>.*/\1/p' | head -1 || true
 }
 
 # The Wikipedia file to work with: the one "update" has settled on, else the most recently
@@ -496,7 +504,7 @@ cmd_update() {
       echo "the e-reader already has the newest snapshot; nothing to do."
       return
     fi
-    size="$(fetch_text "$ZIM_URL/$latest.meta4" | sed -nE 's/.*<size>([0-9]+)<\/size>.*/\1/p' | head -1)"
+    size="$(published_size "$latest")"
     [ -n "$size" ] || die "could not get the size of $latest"
     partial="$PARTIAL_DIR/$latest"
     needed="$size"
@@ -585,95 +593,135 @@ verify_device() {
 
 # The words an app shows for a book, from its file name: <book>_<flavor>_<year>-<month>.zim.
 book_title() {
+  local what
   case "$1" in
-    wikipedia_en_all_*) echo "All of English Wikipedia" ;;
-    wikipedia_en_top_*) echo "English Wikipedia's best-known articles" ;;
-    *) echo "${1%_*}" ;;
+    wikipedia_en_all_*) what="All of English Wikipedia" ;;
+    wikipedia_en_top_*) what="Best-known articles" ;;
+    *) what="${1%_*_*}" ;;
+  esac
+  case "$1" in
+    *_maxi_*) echo "$what, with pictures" ;;
+    *_mini_*) echo "$what, introductions only" ;;
+    *) echo "$what" ;;
   esac
 }
 book_about() {
-  local what
+  local which
   case "$1" in
-    *_nopic_*) what="without pictures" ;;
-    *_mini_*) what="only the start of each, without pictures" ;;
-    *_maxi_*) what="with pictures" ;;
-    *) what="" ;;
+    wikipedia_en_top_*) which="The most-read articles" ;;
+    *) which="Every article" ;;
   esac
   case "$1" in
-    wikipedia_en_all_*) echo "Every article${what:+, $what}." ;;
-    wikipedia_en_top_*) echo "The most-read articles${what:+, $what}. A quick start on a small device." ;;
-    *) echo "A Wikipedia from Kiwix${what:+, $what}." ;;
+    *_maxi_*) echo "$which in full, with pictures." ;;
+    *_mini_*) echo "The opening paragraphs of $(echo "$which" | tr '[:upper:]' '[:lower:]')." ;;
+    *) echo "$which in full, without pictures." ;;
   esac
 }
 
-# One entry of the catalog's "files": $1 = name, $2 = URL, $3 = local copy, $4 = its SHA-256.
+# One entry of the catalog's "files": $1 = name, $2 = URL, $3 = size, $4 = SHA-256.
 catalog_file() {
-  printf '        {"name": "%s", "url": "%s", "size": %s, "sha256": "%s"}' "$1" "$2" "$(size_of "$3")" "$4"
+  printf '        {"name": "%s", "url": "%s", "size": %s, "sha256": "%s"}' "$1" "$2" "$3" "$4"
 }
 
-# Offer the newest downloaded snapshot of each book in PUBLISH_BOOKS to the apps: upload its index
-# to the GitHub release they read, with a catalog.json that lists each book's two files. The
-# Wikipedia file itself is not uploaded: the apps fetch it from Kiwix, as "fetch" does.
+# Offer the newest snapshot Kiwix has of each book in PUBLISH_BOOKS to the apps: upload its index to
+# the GitHub release they read, with a catalog.json that lists each book's two files. Wikipedia
+# itself is not uploaded: the apps fetch it from Kiwix, as "fetch" does.
+#
+# A snapshot's index is taken from here if it was built here, or from GitHub if it is there
+# already; otherwise the snapshot is downloaded, indexed, and deleted again, unless there is not
+# room for it, which is reported. So each run brings every size up to Kiwix's newest.
 cmd_publish() {
   need gh "Install it with: brew install gh, then sign in with: gh auth login"
-  local work book zim name sum want first=yes uploaded line missing=()
+  local work id name zim size want sum isize first=yes uploaded line fetched missing=()
   work="$(mktemp -d)"
   # shellcheck disable=SC2064 # expanded now: the folder is local to this function
   trap "rm -rf '$work'" EXIT
-  : > "$work/indexes" # "<name> <sha256> <path>" for each index the catalog names
+  if gh release view "$PUBLISH_TAG" --repo "$PUBLISH_REPO" > /dev/null 2>&1; then
+    uploaded="$(gh api "repos/$PUBLISH_REPO/releases/tags/$PUBLISH_TAG" --jq '.assets[] | "\(.name) \(.size) \(.digest)"')"
+  else
+    uploaded=""
+  fi
+  : > "$work/indexes" # "<path>" of each index to upload
   {
     echo '{'
     echo '  "format": 1,'
     echo '  "books": ['
   } > "$work/catalog.json"
-  for book in $PUBLISH_BOOKS; do
-    zim="$(ls "$ZIM_DIR"/"$book"_*.zim 2>/dev/null | sort | tail -1 || true)"
-    if [ -z "$zim" ] || [ ! "$zim.idx" -nt "$zim" ]; then
-      echo "skipping $book: no snapshot of it here with its index (./wiki.sh fetch, then index)"
+  for id in $PUBLISH_BOOKS; do
+    name="$(latest_of "$id")"
+    if [ -z "$name" ]; then
+      echo "skipping $id: Kiwix publishes no such book"
       continue
     fi
-    name="$(basename "$zim")"
-    sum="$(shasum -a 256 "$zim.idx" | cut -d' ' -f1)"
+    zim="$ZIM_DIR/$name"
+    size="$( { [ -f "$zim" ] && size_of "$zim"; } || published_size "$name")"
+    [ -n "$size" ] || die "could not get the size of $name"
     want="$(published_sha256 "$zim")" # here, not inside the block below, where a failure would go unseen
-    echo "$name.idx $sum $zim.idx" >> "$work/indexes"
+    # Its index: one built here (newer than the snapshot, if that is still here), or GitHub's.
+    sum="" isize=""
+    if [ -f "$zim.idx" ] && { [ ! -f "$zim" ] || [ "$zim.idx" -nt "$zim" ]; }; then
+      sum="$(shasum -a 256 "$zim.idx" | cut -d' ' -f1)"
+      isize="$(size_of "$zim.idx")"
+      if echo "$uploaded" | grep -qE "^$name\\.idx [0-9]+ sha256:$sum\$"; then
+        echo "$name.idx is already uploaded"
+      else
+        echo "$zim.idx" >> "$work/indexes"
+      fi
+    else
+      line="$(echo "$uploaded" | grep -E "^$name\\.idx [0-9]+ sha256:[0-9a-f]{64}\$" || true)"
+      if [ -n "$line" ]; then
+        isize="$(echo "$line" | cut -d' ' -f2)"
+        sum="$(echo "$line" | sed -E 's/.*sha256://')"
+      else
+        # Not indexed anywhere yet: download it (unless it is here already), index it, and let it go.
+        fetched=no
+        if [ ! -f "$zim" ]; then
+          if [ "$(free_in "$ZIM_DIR")" -le $((size + 2000000000)) ]; then
+            echo "skipping $name: indexing it means downloading it ($(human "$size")), and $(human "$(free_in "$ZIM_DIR")") is free here"
+            continue
+          fi
+          echo "downloading $name ($(human "$size")) to build its index; it is deleted again afterwards"
+          WIKI_BOOK="${id%_*}" "$0" fetch "${id##*_}"
+          [ -f "$zim" ] || die "$name did not arrive"
+          fetched=yes
+        fi
+        ( USE_ZIM="$zim"; cmd_index )
+        [ "$fetched" = no ] || rm -f "$zim"
+        sum="$(shasum -a 256 "$zim.idx" | cut -d' ' -f1)"
+        isize="$(size_of "$zim.idx")"
+        echo "$zim.idx" >> "$work/indexes"
+      fi
+    fi
     [ "$first" = yes ] || echo '    ,' >> "$work/catalog.json"
     first=no
     {
       echo '    {'
-      printf '      "id": "%s", "title": "%s", "about": "%s",\n' "${name%_*}" "$(book_title "$name")" "$(book_about "$name")"
+      printf '      "id": "%s", "title": "%s", "about": "%s",\n' "$id" "$(book_title "$name")" "$(book_about "$name")"
       echo '      "files": ['
       # The index first: it is small, and on its own it is harmless (each app looks for a .zim).
-      catalog_file "$name.idx" "https://github.com/$PUBLISH_REPO/releases/download/$PUBLISH_TAG/$name.idx" "$zim.idx" "$sum"
+      catalog_file "$name.idx" "https://github.com/$PUBLISH_REPO/releases/download/$PUBLISH_TAG/$name.idx" "$isize" "$sum"
       echo ','
-      catalog_file "$name" "$ZIM_URL/$name" "$zim" "$want"
+      catalog_file "$name" "$ZIM_URL/$name" "$size" "$want"
       echo
       echo '      ]'
       echo '    }'
     } >> "$work/catalog.json"
-    echo "offering $name ($(human "$(size_of "$zim")")) and its index"
+    echo "offering $name ($(human "$size")) and its index"
   done
   printf '  ]\n}\n' >> "$work/catalog.json"
-  [ "$first" = no ] || die "nothing to publish: none of $PUBLISH_BOOKS is here with its index"
+  [ "$first" = no ] || die "nothing to publish: none of $PUBLISH_BOOKS could be offered"
   python3 -I -m json.tool "$work/catalog.json" > /dev/null || die "the catalog came out malformed"
 
-  if ! gh release view "$PUBLISH_TAG" --repo "$PUBLISH_REPO" > /dev/null 2>&1; then
+  if [ -z "$uploaded" ] && ! gh release view "$PUBLISH_TAG" --repo "$PUBLISH_REPO" > /dev/null 2>&1; then
     echo "creating the \"$PUBLISH_TAG\" release on $PUBLISH_REPO"
     gh release create "$PUBLISH_TAG" --repo "$PUBLISH_REPO" --latest=false --title "Downloads for Wiki Reader" \
       --notes "What the Wiki Reader apps download: catalog.json lists each Wikipedia the apps offer, with the title index built for it here. Wikipedia itself comes from Kiwix (download.kiwix.org). Content from Wikipedia, CC BY-SA 4.0. Made by ./wiki.sh publish." > /dev/null
   fi
-  # An index is sent only if GitHub does not already hold the same bytes: the apps check each
+  # An index goes up only if GitHub does not already hold the same bytes: the apps check each
   # download against the checksum in the catalog.
-  uploaded="$(gh api "repos/$PUBLISH_REPO/releases/tags/$PUBLISH_TAG" --jq '.assets[] | "\(.name) \(.digest)"')"
-  while read -r line; do
-    set -- $line
-    if echo "$uploaded" | grep -qxF "$1 sha256:$2"; then
-      echo "$1 is already uploaded"
-    else
-      missing+=("$3")
-    fi
-  done < "$work/indexes"
+  while read -r line; do missing+=("$line"); done < "$work/indexes"
   if [ "${#missing[@]}" -gt 0 ]; then
-    echo "uploading ${#missing[@]} index file(s); the full Wikipedia's is about 0.7 GB"
+    echo "uploading ${#missing[@]} index file(s)"
     gh release upload "$PUBLISH_TAG" "${missing[@]}" --repo "$PUBLISH_REPO" --clobber
   fi
   # The catalog goes last, so that it never names an index that is not there yet.

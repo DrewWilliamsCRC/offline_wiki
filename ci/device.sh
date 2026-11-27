@@ -48,7 +48,7 @@ case "\$1 \$2" in
     done ;;
   "api repos/someone/offline_wiki/releases/tags/"*)
     for f in "$github/\${2##*/}"/*; do
-      [ -e "\$f" ] && echo "\$(basename "\$f") sha256:\$(shasum -a 256 "\$f" | cut -d' ' -f1)"
+      [ -e "\$f" ] && echo "\$(basename "\$f") \$(stat -f %z "\$f") sha256:\$(shasum -a 256 "\$f" | cut -d' ' -f1)"
     done; true ;;
   *) echo "the stand-in gh does not know: \$*" >&2; exit 2 ;;
 esac
@@ -85,7 +85,7 @@ done
 wiki() {
   WIKI_DATA="$work/data" WIKI_BOOK="${use_book:-$book}" WIKI_DEVICE_FOLDER="${use_folder:-Download}" \
     WIKI_ZIM_URL="http://127.0.0.1:$port" WIKI_MTP_PAUSE=0 WIKI_DOWNLOADS="$work/Downloads" \
-    WIKI_PUBLISH="${use_publish:-$book wikipedia_en_top}" WIKI_PUBLISH_REPO=someone/offline_wiki \
+    WIKI_PUBLISH="${use_publish:-${book}_nopic ${book}_mini wikipedia_en_none_nopic}" WIKI_PUBLISH_REPO=someone/offline_wiki \
     FAKE_MTP_DIR="$device" PATH="$work/bin:$PATH" "$root/wiki.sh" "$@"
 }
 
@@ -288,34 +288,54 @@ check "nothing is left to do" eval '[ "$(log_lines)" = "$sent" ]'
 
 scenario "publish what the apps can download"
 release="$github/downloads"
+mini="${book}_mini_2026-02.zim" # a second size, which this Mac has not downloaded
+publish "$mini"
 run 0 publish
-check "it skips a book that has no index here" says "skipping wikipedia_en_top"
-check "the index is uploaded" same "$zims/$new.idx" "$release/$new.idx"
-check "the catalog lists the index, then Wikipedia, with their sizes, checksums and addresses" \
-  python3 -I - "$release/catalog.json" "$zims/$new" "$kiwix/$new.sha256" "http://127.0.0.1:$port" << 'EOF'
+check "it skips a book Kiwix does not publish" says "skipping wikipedia_en_none_nopic"
+check "the index built here is uploaded" same "$zims/$new.idx" "$release/$new.idx"
+check "a size with no index yet is downloaded, indexed and let go again" \
+  eval 'says "to build its index" && [ -s "$zims/$mini.idx" ] && gone "$zims/$mini" && same "$zims/$mini.idx" "$release/$mini.idx"'
+# Each book in the order asked for, its index first, then Wikipedia from "Kiwix", with sizes and
+# checksums that match what is there.
+catalog_matches() {
+  python3 -I - "$release" "$kiwix" "http://127.0.0.1:$port" "$new" "$mini" << 'EOF'
 import hashlib, json, os, sys
-catalog, zim, published, kiwix = sys.argv[1:]
-c = json.load(open(catalog))
-assert c["format"] == 1 and len(c["books"]) == 1, c
-book = c["books"][0]
-name = os.path.basename(zim)
-assert book["id"] == name.rsplit("_", 1)[0] and book["title"] and book["about"], book
-idx, z = book["files"]
-assert idx["name"] == name + ".idx" and idx["size"] == os.path.getsize(zim + ".idx"), idx
-assert idx["sha256"] == hashlib.sha256(open(zim + ".idx", "rb").read()).hexdigest(), idx
-assert idx["url"] == "https://github.com/someone/offline_wiki/releases/download/downloads/" + name + ".idx", idx
-assert z["name"] == name and z["size"] == os.path.getsize(zim) and z["url"] == kiwix + "/" + name, z
-assert z["sha256"] == open(published).read().split()[0], z
+release, kiwix, url = sys.argv[1:4]
+names = sys.argv[4:]
+c = json.load(open(os.path.join(release, "catalog.json")))
+assert c["format"] == 1 and len(c["books"]) == len(names), c
+for book, name in zip(c["books"], names):
+    assert book["id"] == name.rsplit("_", 1)[0] and book["title"] and book["about"], book
+    idx, z = book["files"]
+    held = open(os.path.join(release, name + ".idx"), "rb").read()
+    assert idx["name"] == name + ".idx" and idx["size"] == len(held), idx
+    assert idx["sha256"] == hashlib.sha256(held).hexdigest(), idx
+    assert idx["url"] == "https://github.com/someone/offline_wiki/releases/download/downloads/" + name + ".idx", idx
+    assert z["name"] == name and z["size"] == os.path.getsize(os.path.join(kiwix, name)) and z["url"] == url + "/" + name, z
+    assert z["sha256"] == open(os.path.join(kiwix, name + ".sha256")).read().split()[0], z
 EOF
-check "the catalog goes up after the index" eval '[ "$(tail -1 "$github/log")" = "upload catalog.json" ]'
+}
+check "the catalog lists each size: its index, then Wikipedia, with sizes, checksums and addresses" catalog_matches
+check "the catalog goes up after the indexes" eval '[ "$(tail -1 "$github/log")" = "upload catalog.json" ]'
+
 run 0 publish
-check "an index GitHub already has is not sent again" eval '[ "$(grep -c "upload $new.idx" "$github/log")" = 1 ]'
+check "an index GitHub already has is not sent again" \
+  eval '[ "$(grep -c "upload $new.idx" "$github/log")" = 1 ] && [ "$(grep -c "upload $mini.idx" "$github/log")" = 1 ]'
 check "it says so" says "already uploaded"
+check "a size indexed before is not downloaded again" eval '! says "to build its index"'
+
+rm -f "${zims:?}/${mini:?}.idx"
+run 0 publish
+check "an index only GitHub has is used as it is" eval '! says "to build its index" && gone "$zims/$mini"'
+check "and the catalog still matches" catalog_matches
+
 head -c 3000 /dev/urandom > "$zims/$new.idx"
 run 0 publish
 check "a changed index is sent again" eval '[ "$(grep -c "upload $new.idx" "$github/log")" = 2 ] && same "$zims/$new.idx" "$release/$new.idx"'
+
+sent="$(grep -c . "$github/log")"
 use_publish=nothing_here run fail publish
-check "with nothing to offer, it says so and uploads nothing" eval 'says "nothing to publish" && [ "$(grep -c . "$github/log")" = 5 ]'
+check "with nothing to offer, it says so and uploads nothing" eval 'says "nothing to publish" && [ "$(grep -c . "$github/log")" = "$sent" ]'
 
 scenario "a Wikipedia that Kiwix does not publish"
 use_book=wikipedia_en_nothing run fail fetch nopic
