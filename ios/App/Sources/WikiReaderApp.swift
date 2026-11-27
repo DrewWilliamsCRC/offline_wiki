@@ -8,6 +8,10 @@ struct WikiReaderApp: App {
     @StateObject private var history = History()
     @StateObject private var downloads = Downloads.shared
 
+    init() {
+        ArticleView.adoptSystemTextSize()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
