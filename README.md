@@ -137,6 +137,11 @@ punctuation, matches the start of any word in a title, and falls back to "all th
 order". Results are ranked by how well known the article is, estimated from Kiwix's top-articles
 selection, article length, and how many alternative names point at it.
 
+When that finds fewer than eight titles, it forgives one slip: a letter too many, too few, wrong,
+or two swapped ("berln" finds Berlin, "the beatls" The Beatles, "newyork" New York). Up to eight
+such titles are added after the others. The first letter has to be right, and a query shorter than
+five letters gets none.
+
 - It searches **titles**, not article text. For full-text search, use Kiwix with the same file.
 - The `nopic` build has no images. Wiki Reader hides what they leave behind: empty picture frames,
   the place-name labels of location maps, and captions such as "Flag" and "Coat of arms".

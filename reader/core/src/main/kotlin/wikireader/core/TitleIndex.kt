@@ -94,10 +94,10 @@ class TitleIndex(private val channel: FileChannel, private val name: String) : C
         return 0
     }
 
-    /** First position in [0, count) whose text is not before [query]; [after] moves past matches too. */
-    private inline fun bound(count: Int, query: ByteArray, after: Boolean, compare: (Int, ByteArray) -> Int): Int {
-        var lo = 0
-        var hi = count
+    /** First position in [from, to) whose text is not before [query]; [after] moves past matches too. */
+    private inline fun bound(from: Int, to: Int, query: ByteArray, after: Boolean, compare: (Int, ByteArray) -> Int): Int {
+        var lo = from
+        var hi = to
         while (lo < hi) {
             val mid = (lo + hi) ushr 1
             val c = compare(mid, query)
@@ -117,15 +117,16 @@ class TitleIndex(private val channel: FileChannel, private val name: String) : C
         val size: Int get() = to - from
     }
 
-    private fun titleRange(q: ByteArray) = Range(bound(recordCount, q, false, ::compareTitle), bound(recordCount, q, true, ::compareTitle))
-    private fun innerRange(q: ByteArray) = Range(bound(innerCount, q, false, ::compareInner), bound(innerCount, q, true, ::compareInner))
+    private fun titleRange(q: ByteArray) = Range(bound(0, recordCount, q, false, ::compareTitle), bound(0, recordCount, q, true, ::compareTitle))
+    private fun innerRange(q: ByteArray) = Range(bound(0, innerCount, q, false, ::compareInner), bound(0, innerCount, q, true, ::compareInner))
 
     /**
      * Up to [limit] titles for [query], best first:
      *  1. titles that are exactly the query;
      *  2. titles that start with it, most popular first;
      *  3. titles with the query starting at a later word, most popular first;
-     *  4. if that leaves the list short and there are several words, titles containing all of them.
+     *  4. if that leaves the list short and there are several words, titles containing all of them;
+     *  5. if the list is still short, a few titles one slip of the fingers away (see [nearMisses]).
      * Each article appears once, under the first title that found it. [cancelled] is polled so a
      * search made stale by the next keystroke can stop early.
      */
@@ -154,6 +155,14 @@ class TitleIndex(private val channel: FileChannel, private val name: String) : C
 
         val words = normalized.split(' ').filter { it.isNotEmpty() && it !in SearchText.STOP_WORDS }
         if (words.size > 1 && hits.size < FEW) allWords(words, ::add)
+
+        if (hits.size < minOf(FEW, limit) && !cancelled()) {
+            var more = NEAR_MOST
+            for (record in nearMisses(q, cancelled)) {
+                val had = hits.size
+                if (!add(record) || (hits.size > had && --more == 0)) break
+            }
+        }
         return hits
     }
 
@@ -179,6 +188,73 @@ class TitleIndex(private val channel: FileChannel, private val name: String) : C
         fun consider(record: Int): Boolean = !others.all { hasWord(record, it) } || add(record)
         if (!titleRanks.descending(bestTitles.from, bestTitles.to, VISITS, ::consider)) return
         innerRanks.descending(bestInners.from, bestInners.to, VISITS) { consider(innerRecord(it)) }
+    }
+
+    /**
+     * Titles one slip away from the query [q], for a search that found next to nothing: a letter
+     * too many, one missing, two swapped or one wrong ("berln", "nvidai", "the beatls"). Each
+     * corrected spelling is looked up as the start of a title, as the query itself is.
+     *
+     * Best first: the titles in which a corrected spelling ends where a word ends ("Berlin",
+     * "Berlin Wall") come before those in which it stops inside a word ("Berlusconi", from
+     * "berl"), and within each kind the most popular come first.
+     *
+     * The first letter is taken as right, and so is every byte of a letter that takes more than
+     * one. A query shorter than [NEAR_MIN] bytes is left alone: one slip from a few letters is
+     * half the alphabet.
+     */
+    private fun nearMisses(q: ByteArray, cancelled: () -> Boolean): List<Int> {
+        if (q.size < NEAR_MIN) return emptyList()
+        val whole = ArrayList<Int>()
+        val part = ArrayList<Int>()
+        val tried = HashSet<String>() // a doubled letter gives the same spelling twice
+        // Takes the titles in [from, to) that start with [spelling]; the range holds all of them.
+        fun look(spelling: ByteArray, from: Int, to: Int) {
+            if (!tried.add(String(spelling, Charsets.ISO_8859_1))) return
+            val first = bound(from, to, spelling, false, ::compareTitle)
+            if (first >= to || compareTitle(first, spelling) != 0) return
+            val end = bound(first, to, spelling, true, ::compareTitle)
+            // The titles that are the spelling and nothing more sort first, then those that go on
+            // with a space; `word` is where both have ended.
+            val word = bound(first, end, spelling + SPACE, true, ::compareTitle)
+            titleRanks.descending(first, word, NEAR_EACH) { whole += it; true }
+            titleRanks.descending(word, end, NEAR_EACH) { part += it; true }
+        }
+        // [from, to) holds the titles that start with the query's first i bytes. A slip at byte i
+        // leaves those as they are, so every correction of it is in there; and once no title
+        // starts with them, no slip further along can lead to one.
+        var from = 0
+        var to = recordCount
+        fun narrow(start: ByteArray) {
+            from = bound(from, to, start, false, ::compareTitle)
+            to = bound(from, to, start, true, ::compareTitle)
+        }
+        narrow(q.copyOf(1))
+        for (i in 1 until q.size) {
+            if (from >= to || cancelled()) break
+            val here = q[i]
+            if (here >= 0) { // one byte, one letter
+                val before = q.copyOf(i)
+                val after = q.copyOfRange(i + 1, q.size)
+                look(before + after, from, to) // typed a letter too many
+                if (i + 1 < q.size && q[i + 1] >= 0 && q[i + 1] != here) { // typed two the wrong way round
+                    look(before + q[i + 1] + here + q.copyOfRange(i + 2, q.size), from, to)
+                }
+                if (here != SPACE && q[i - 1] != SPACE) look(before + SPACE + here + after, from, to) // left a space out
+                for (letter in 'a'.code..'z'.code) {
+                    // Only letters that some title has at this point are worth trying.
+                    val next = before + letter.toByte()
+                    val first = bound(from, to, next, false, ::compareTitle)
+                    val last = bound(first, to, next, true, ::compareTitle)
+                    if (first == last) continue
+                    if (letter.toByte() != here) look(next + after, first, last) // typed a wrong letter
+                    look(next + here + after, first, last) // left a letter out
+                }
+            }
+            narrow(q.copyOf(i + 1))
+        }
+        val best = compareByDescending<Int> { titleRanks.rank(it) }.thenBy { it }
+        return whole.sortedWith(best) + part.sortedWith(best)
     }
 
     /** Whether some word of the record's title starts with [word]. */
@@ -297,7 +373,10 @@ class TitleIndex(private val channel: FileChannel, private val name: String) : C
         private const val MAX_EXACT = 64
         private const val LEAD_EXACT = 3
         private const val VISITS = 600 // matches examined per step; many titles lead to the same article
-        private const val FEW = 8      // below this many results, also try the words in any order
+        private const val FEW = 8      // below this many results, also try the words in any order, then near misses
+        private const val NEAR_MIN = 5  // the shortest query, in bytes, that near misses are looked for
+        private const val NEAR_EACH = 16 // titles taken from each corrected spelling: its best-ranked
+        private const val NEAR_MOST = 8 // near misses added to a list at most
         private const val RANDOM_TRIES = 64
 
         /**
