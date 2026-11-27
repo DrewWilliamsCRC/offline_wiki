@@ -41,6 +41,7 @@ struct SearchView: View {
                 }
             }
             .listStyle(.plain)
+            .safeAreaInset(edge: .bottom) { age }
             .navigationTitle("Wikipedia")
             .navigationDestination(for: Reading.self) { reading in
                 ArticleView(library: library, article: reading.article, position: reading.position, history: history)
@@ -64,6 +65,33 @@ struct SearchView: View {
             }
         }
         .onChange(of: stack) { history.reading = !$0.isEmpty }
+    }
+
+    /// When this copy of Wikipedia was made, from its file's name: no network is needed to say so,
+    /// and the app looks for newer ones only when asked, on the downloads screen. Past six months
+    /// it says a newer copy may be out, and leads there. Nothing for a file named otherwise.
+    @ViewBuilder
+    private var age: some View {
+        if trimmed.isEmpty, let snapshot = Snapshot(library.fileName) {
+            Group {
+                if SearchView.monthsOld(snapshot) > 6 {
+                    Button("Wikipedia as of \(snapshot.month). A newer copy may be out: see Downloads.") { downloads.showing = true }
+                } else {
+                    Text("Wikipedia as of \(snapshot.month)").foregroundStyle(.secondary)
+                }
+            }
+            .font(.footnote)
+            .frame(maxWidth: .infinity)
+            .padding(8)
+            .background(.bar)
+        }
+    }
+
+    private static func monthsOld(_ snapshot: Snapshot) -> Int {
+        let parts = snapshot.date.split(separator: "-").compactMap { Int($0) }
+        let now = Calendar.current.dateComponents([.year, .month], from: Date())
+        guard parts.count == 2, let year = now.year, let month = now.month else { return 0 }
+        return (year * 12 + month) - (parts[0] * 12 + parts[1])
     }
 
     /// `recent` rows open where the reader left the article, and say how far that is.
