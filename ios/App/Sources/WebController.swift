@@ -38,6 +38,9 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
         configuration.setURLSchemeHandler(server, forURLScheme: WikiAddress.scheme)
         // Articles are static HTML; their scripts would only cost time. Our own calls still run.
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        // On an iPad WebKit otherwise shows pages as a desktop browser would, where the text size
+        // the reader chooses (-webkit-text-size-adjust, see ArticleServer.style) has no effect.
+        configuration.defaultWebpagePreferences.preferredContentMode = .mobile
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         webView.navigationDelegate = self
