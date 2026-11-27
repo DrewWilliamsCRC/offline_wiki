@@ -74,32 +74,39 @@ e-reader.
 
 ## 2. Copy to the e-reader
 
-Plug the e-reader in with a USB cable, unlock it, and choose "File transfer" if it asks.
+First install Wiki Reader on the e-reader and give it its folder (step 3), so that the folder is
+there to copy into. Then plug the e-reader in with a USB cable, unlock it, and choose "File
+transfer" if it asks.
 
 ```sh
-./wiki.sh push            # Wiki Reader, the index and Wikipedia, into the Download folder
+./wiki.sh push            # Wikipedia and its index into the Wikipedia folder (and the app into Download)
 ./wiki.sh verify device   # optional: reads Wikipedia back and re-checks it (as slow as the copy)
 ```
 
-Files already on the e-reader are skipped, so the same command sends an updated app or index. Keep
-the e-reader awake during the big copy; it cannot resume, so an interrupted one starts over.
+Files already on the e-reader are skipped, so the same command sends an updated index. Keep the
+e-reader awake during the big copy; it cannot resume, so an interrupted one starts over.
 
-`push` sends the app that `./wiki.sh app` last built; it does not build one. After updating this
-repository, run `./wiki.sh app` again, then `push`, and install the new app as in step 3.
+Wiki Reader 1.0 and later read Wikipedia only from the folder they were given, not from Download.
+If an earlier `push` left it in Download, `push` stops and asks you to move it: in the e-reader's
+file manager, move the `.zim` and its `.zim.idx` from Download into the Wikipedia folder, which
+takes a moment, then run `push` again.
 
-If no e-reader answers, `push` asks whether to copy the app alone into this Mac's Downloads folder
-instead, for when you would rather get a new build onto the e-reader some other way. Wikipedia and
-its index still need the cable.
+`push` also sends the app that `./wiki.sh app` last built, for installing by hand; it does not
+build one. If no e-reader answers, `push` asks whether to copy that app alone into this Mac's
+Downloads folder instead. Wikipedia and its index still need the cable.
 
 This uses MTP, the ordinary Android file-transfer mode. `adb` is not used: the Viwoods AiPaper
 Reader shows up in adb but refuses its shell, install and file-transfer commands.
 
 ## 3. On the e-reader
 
-1. In the file manager, open Download and tap `wiki-reader-….apk` to install it. A newer one
-   installs over the app that is there and keeps its reading history.
-2. Open **Wiki Reader**. The first time, tap **Allow file access** and switch on "Allow access to
-   manage all files", then go back. It needs this to read a file in Download.
+1. Install Wiki Reader from the Play Store, as a tester (see
+   [Google Play](#google-play)), or tap `wiki-reader-….apk` in Download in the file manager. The
+   two cannot update each other: to switch, uninstall the one you have first. The Wikipedia folder
+   stays.
+2. Open **Wiki Reader**. The first time, it asks for a folder: tap **Choose a folder**, make a new
+   folder named **Wikipedia** at the top of the storage (or open the one there), tap **Use this
+   folder**, and allow access. The app reads and writes only there.
 3. Type a title. Tap a result to read it. With the search box empty, the list is what you read
    recently and how far you got in each; tap one to carry on from there. **Random** opens an
    article picked for you.
@@ -107,12 +114,20 @@ Reader shows up in adb but refuses its shell, install and file-transfer commands
 Closed and opened again, or restarted by the e-reader, the app returns to the article you were
 reading and the place you had reached.
 
-Without a Wikipedia in Download, the app offers to download one instead (see
+Without a Wikipedia in its folder, the app offers to download one instead (see
 [Downloading in the app](#downloading-in-the-app)). The cable is faster.
 
 In an article, the bar at the bottom has Back, Search, Sections, text size (A− / A+), how far
 through the article you are, and page-turn buttons (▲ ▼). Volume and page keys turn pages too.
 Sections lists the article's headings; tap one to jump to it, and Back returns to where you were.
+
+## Google Play
+
+The Android app is on Google Play for testers (internal testing): people added in Play Console get
+an invitation, install Wiki Reader from the Play Store, and get each new build from there. Builds
+are uploaded with [reader/scripts/play-upload.sh](reader/scripts/play-upload.sh) from this Mac.
+See "Google Play" in [CLAUDE.md](CLAUDE.md) for the setup, and [PRIVACY.md](PRIVACY.md) for the
+app's privacy policy (it collects nothing).
 
 ## How search works, and its limits
 
