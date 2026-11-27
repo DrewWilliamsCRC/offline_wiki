@@ -17,28 +17,37 @@ import android.widget.TextView
 import kotlin.concurrent.thread
 
 /**
- * The books in the [Catalog], each with how much of it is here and a button to download it, carry
- * on, pause, or open it once it has arrived. The download itself runs in [Downloads]; this screen
- * looks at it every couple of seconds and changes only text that has changed, which is what an
- * e-ink screen can redraw without flashing. With [openWhenDone], for when there is nothing to read
- * yet, a download that finishes while the screen is up opens at once ([onReady]); otherwise it
- * waits for Open, so as not to pull the reader out of what they have open. [reading] is the name
- * of the Wikipedia file open now, if any: a book that is open offers no Open.
+ * The books in the [Catalog] (each size of Wikipedia on offer), each with how much of it is here
+ * and what can be done: download it, pause, carry on, open it once it has arrived, update an older
+ * snapshot of it, or delete it. The download itself runs in [Downloads]; this screen looks at it
+ * every couple of seconds and changes only text that has changed, which is what an e-ink screen
+ * can redraw without flashing. Deleting asks first, in place, rather than in a dialog.
+ *
+ * [openWhenDone] says whether there is nothing to read yet: then a download that finishes while
+ * the screen is up opens at once ([onReady]); otherwise it waits for Open, so as not to pull the
+ * reader out of what they have open. [reading] is the name of the Wikipedia file open now, if
+ * any: a book that is open offers no Open. [letGo] is asked to close any of the given files
+ * before they are deleted, since a deleted file that is still open keeps its space.
  */
 class DownloadScreen(
     private val activity: Activity,
-    private val openWhenDone: Boolean,
-    private val reading: String?,
+    private val openWhenDone: () -> Boolean,
+    private val reading: () -> String?,
+    private val letGo: (names: Set<String>) -> Unit,
     private val onClose: () -> Unit,
     private val onReady: () -> Unit,
 ) {
-    /** The parts of one book's entry that change. */
-    private class Entry(val book: Catalog.Book, val state: TextView, val button: TextView)
+    /** The parts of one book's entry that change: what is said, and up to two buttons. */
+    private class Entry(val book: Catalog.Book, val state: TextView, val first: TextView, val second: TextView)
+
+    /** What an entry says and offers at the moment. */
+    private class Look(val state: String, val first: String? = null, val second: String? = null)
 
     private val main = Handler(Looper.getMainLooper())
     private val entries = mutableListOf<Entry>()
     private var closed = false
     private var sawRunning = false
+    private var confirming: String? = null // "Delete <id>" or "Replace <id>", waiting for the second tap
 
     private val body = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
@@ -105,9 +114,16 @@ class DownloadScreen(
             body.addView(text("${book.about} ${Downloads.gb(book.size)}", 16f), wrap(top = 4))
             val state = text("", 16f)
             body.addView(state, wrap(top = 4))
-            val entry = Entry(book, state, Ui.button(activity, "") {})
-            entry.button.setOnClickListener { act(entry) }
-            body.addView(entry.button, wrap(top = 8))
+            val entry = Entry(book, state, Ui.button(activity, "") {}, Ui.button(activity, "") {})
+            entry.first.setOnClickListener { act(entry, entry.first.text.toString()) }
+            entry.second.setOnClickListener { act(entry, entry.second.text.toString()) }
+            body.addView(LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(entry.first)
+                addView(entry.second, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    leftMargin = Ui.dp(activity, 12)
+                })
+            }, wrap(top = 8))
             entries += entry
         }
         refresh()
@@ -120,55 +136,97 @@ class DownloadScreen(
 
     private fun refresh() {
         val status = Downloads.status
-        if (Downloads.running) sawRunning = true
-        if (openWhenDone && sawRunning && !Downloads.running && status?.doing == "Done") {
-            main.post { if (!closed) onReady() }
-            return
+        // Only at the moment a download ends: what was done before (a book deleted since, say)
+        // must not open anything.
+        if (Downloads.running) {
+            sawRunning = true
+        } else if (sawRunning) {
+            sawRunning = false
+            if (status?.doing == "Done" && openWhenDone()) {
+                main.post { if (!closed) onReady() }
+                return
+            }
         }
         for (entry in entries) {
-            val book = entry.book
-            val mine = status?.book?.id == book.id
-            val (state, button) = when {
-                mine && Downloads.running -> {
-                    val doing = status!!.doing
-                    val amount = if (doing.endsWith("%")) "" else ": ${Downloads.gb(status.done)} of ${Downloads.gb(status.total)}"
-                    "$doing$amount" to "Pause"
-                }
-                Downloads.complete(book) -> {
-                    // Open is for one that has just arrived and is not the one open already.
-                    val fresh = mine && status!!.doing == "Done" && book.files.none { it.name == reading }
-                    (if (fresh) "Downloaded. It is ready to read." else "On this device.") to (if (fresh) "Open" else null)
-                }
-                mine && status!!.problem != null -> status.problem to "Try again"
-                Downloads.running -> waiting(book) to null // one download at a time
-                Downloads.have(book) > 0 -> "Paused: ${Downloads.gb(Downloads.have(book))} of ${Downloads.gb(book.size)} is here." to "Carry on"
-                else -> "Not on this device." to "Download"
-            }
-            if (entry.state.text.toString() != state) entry.state.text = state
-            if (button == null) {
-                entry.button.visibility = View.GONE
-            } else {
-                if (entry.button.text.toString() != button) entry.button.text = button
-                entry.button.visibility = View.VISIBLE
-            }
+            val look = look(entry.book, status)
+            if (entry.state.text.toString() != look.state) entry.state.text = look.state
+            show(entry.first, look.first)
+            show(entry.second, look.second)
         }
     }
 
-    private fun waiting(book: Catalog.Book): String {
-        val have = Downloads.have(book)
-        return if (have > 0) "Paused: ${Downloads.gb(have)} of ${Downloads.gb(book.size)} is here." else "Not on this device."
+    private fun show(button: TextView, label: String?) {
+        if (label == null) {
+            button.visibility = View.GONE
+        } else {
+            if (button.text.toString() != label) button.text = label
+            button.visibility = View.VISIBLE
+        }
     }
 
-    private fun act(entry: Entry) {
-        when (entry.button.text.toString()) {
+    private fun look(book: Catalog.Book, status: Downloads.Status?): Look {
+        val mine = status?.book?.id == book.id
+        val snapshot = Downloads.snapshotOf(book)?.month ?: "the catalog's"
+        val older = Downloads.older(book).firstOrNull()?.let { Snapshot.of(it.name)?.month }
+        val have = Downloads.have(book)
+        val amount = "${Downloads.gb(have)} of ${Downloads.gb(book.size)}"
+        return when {
+            mine && Downloads.running -> {
+                val doing = status!!.doing
+                Look(if (doing.endsWith("%")) doing else "$doing: ${Downloads.gb(status.done)} of ${Downloads.gb(status.total)}", "Pause")
+            }
+            confirming == "Delete ${book.id}" ->
+                Look("Delete this Wikipedia from the device? It cannot be undone, but it can be downloaded again.", "Delete", "Keep")
+            confirming == "Replace ${book.id}" && older != null ->
+                Look("There is not room for both copies, so the $older one is deleted first: until the download finishes there is no copy of it to read.", "Replace", "Keep")
+            Downloads.complete(book) -> {
+                // Open is for one that has just arrived and is not the one open already.
+                val fresh = mine && status!!.doing == "Done" && book.files.none { it.name == reading() }
+                if (fresh) Look("Downloaded. It is ready to read.", "Open")
+                else Look("On this device: $snapshot.", if (Downloads.running) null else "Delete")
+            }
+            mine && status!!.problem != null -> Look(status.problem, "Try again", if (older != null) "Delete" else null)
+            Downloads.running -> Look(if (have > 0) "Paused: $amount is here." else if (older != null) "On this device: $older." else "Not on this device.")
+            have > 0 -> Look("Paused: $amount is here.", "Carry on", "Delete")
+            older != null -> Look(
+                "On this device: $older. A newer copy, from $snapshot, can be downloaded.",
+                if (Downloads.roomFor(book) || !Downloads.roomIfReplaced(book)) "Update" else "Replace",
+                "Delete",
+            )
+            else -> Look("Not on this device.", "Download")
+        }
+    }
+
+    private fun act(entry: Entry, action: String) {
+        val book = entry.book
+        val asked = confirming
+        confirming = null
+        when (action) {
             "Pause" -> Downloads.stop()
             "Open" -> onReady()
-            else -> {
-                askToNotify()
-                Downloads.start(activity, entry.book)
+            "Keep" -> Unit
+            "Delete" -> if (asked == "Delete ${book.id}") {
+                val files = Downloads.filesOf(book)
+                letGo(files.map { it.name }.toSet())
+                Downloads.delete(book)
+            } else {
+                confirming = "Delete ${book.id}"
             }
+            "Replace" -> if (asked == "Replace ${book.id}") {
+                letGo(Downloads.older(book).map { it.name }.toSet())
+                Downloads.deleteOlder(book)
+                start(book)
+            } else {
+                confirming = "Replace ${book.id}"
+            }
+            else -> start(book) // Download, Update, Carry on, Try again
         }
         refresh()
+    }
+
+    private fun start(book: Catalog.Book) {
+        askToNotify()
+        Downloads.start(activity, book)
     }
 
     /** The download's progress is a notification; Android 13 and later ask before showing one. */

@@ -145,8 +145,12 @@ Things that span files:
   a second file), article length, and capped inbound-redirect count. Redirect titles get a fraction
   of their article's rank. Random uses the rank too: it only picks articles at or above
   `TitleIndex.MIN_ARTICLE_RANK`, which the forwarding pages described below fall under.
-- **The app finds its data by convention**: the largest `*.zim` in Download (or Documents) that has
-  a `<name>.zim.idx` beside it, opened by path. That is why it needs "all files access".
+- **The app finds its data by convention**: a `*.zim` in Download (or Documents) with a
+  `<name>.zim.idx` beside it, opened by path. That is why it needs "all files access". Of each
+  book (`<book>_<flavor>`, the name without its `_<year>-<month>.zim`) only the newest snapshot
+  counts, then the biggest of those wins (`Library.findZim`, `LibraryStore.reload`). Newest before
+  biggest, because an update can be smaller than what it replaces (Kiwix's "top" with pictures
+  went from 7.8 to 6.5 GB) and an older copy may linger beside it.
 - **Both apps hold the files open only while on screen** (`Library.hold` and `release`, called from
   `MainActivity.onStart`/`onStop` and from `RootView`'s scene phase). Out of sight, a read opens
   them for just that read. Otherwise a snapshot deleted over USB would keep its 53 GB and `update`
@@ -186,14 +190,30 @@ Things that span files:
   - **The index comes first**, the `.zim` last: an index alone is harmless, as both apps look
     for a `.zim`, so Wikipedia appears to the app only when it is complete.
   - **Wi-Fi only, and room checked first** (the space still needed plus 100 MB). One book at a
-    time. Nothing is deleted to make room: an older Wikipedia goes by the user's hand.
+    time.
+  - **Every size Kiwix publishes can be offered**, each a book of its own: all of English
+    Wikipedia or its best-known articles, with pictures (`maxi`), without (`nopic`) or only the
+    opening paragraphs (`mini`). The reader handles pictures: they sit in uncompressed clusters,
+    which `ZimFile` reads directly.
+  - **Updates**: a book whose snapshot here is older than the catalog's offers Update. The new
+    one downloads beside the old, and the old one (with its index) is deleted once the new one is
+    checked and in place. If both will not fit but the new one would without the old, it offers
+    Replace instead, which asks, then deletes the old one first. Delete removes a book, also
+    after asking (in place on Android, where dialogs animate; a confirmation dialog on iOS).
+    Before deleting, each app closes the file if it is the one open (`MainActivity.letGo`,
+    `LibraryStore.letGo`), since a deleted file that is still open keeps its space.
+  - **A file is flushed to disk before it takes its name**, so that a device that loses power
+    just after is not left with an empty file under the final name. (A hard stop of the emulator
+    did exactly that to an index before this.)
   - Android runs the download in a foreground service (`dataSync`) with a wake lock, and the
     screen reads `Downloads.status` every two seconds, changing only text that changed (e-ink).
     iOS wakes through `AppDelegate`'s background-session handler.
-  - A first Wikipedia opens as soon as it arrives. One that arrives while another is open is not
+  - A first Wikipedia opens as soon as it arrives, judged at the moment the download ends (not
+    later, when a deletion has left nothing open). One that arrives while another is open is not
     switched to on the spot, so as not to pull the reader out of an article: the downloads
-    screen offers Open, and otherwise the app moves to it (the bigger one) the next time it comes
-    forward, as it does for files copied over.
+    screen offers Open, and otherwise the app moves to it the next time it comes forward, as it
+    does for files copied over. On iOS the downloads sheet hangs off `RootView`, not the screen
+    beneath, which can change while it is up.
 - **Articles are served to the WebView** from `https://wiki.offline/<zim path>` through
   `shouldInterceptRequest`, so the articles' relative links and stylesheets resolve unchanged.
   `ReaderScreen.STYLE` is injected into each article to adapt Wikipedia's CSS for e-ink.
@@ -327,12 +347,17 @@ Things to know:
   nine in the iPad simulator). `WebController` therefore watches `title` and files the article in
   the history once both have happened. Reading `webView.title` in `didFinish` blanks the title bar
   and drops the article from the history on those loads.
-- **Two UI tests use the network.** `testDownloadsListsWhatCanBeDownloaded` reads the published
-  catalog. `DownloadUITests` downloads the small book for real (about 3 GB, five minutes or more),
-  pausing, carrying on and relaunching on the way, so it runs only with `TEST_RUNNER_DOWNLOAD=1`,
-  and wants a fresh app: `xcrun simctl uninstall <simulator> dev.offlinewiki.reader` first. In
-  the Android emulator the same is done by hand; `truncate -s <size>` on a `.part` in Download
-  makes a damaged file to see the checksum refuse it.
+- **Three UI tests use the network.** `testDownloadsListsWhatCanBeDownloaded` reads the published
+  catalog. `DownloadUITests` downloads the best-known articles for real (about 3 GB, five minutes
+  or more), pausing, carrying on and relaunching on the way, so it runs only with
+  `TEST_RUNNER_DOWNLOAD=1`, and wants a fresh app: `xcrun simctl uninstall <simulator>
+  dev.offlinewiki.reader` first. `UpdateUITests` (`TEST_RUNNER_UPDATE=1`) updates an older
+  snapshot of the 0.3 GB build and then deletes it; the older snapshot is the catalog's own file
+  copied into the app's Documents under an earlier date, as the comment at its top shows. The
+  downloads list makes only the rows on screen, so the tests scroll to a book before using it.
+  In the Android emulator the same is done by hand: rename a `.zim` and its `.idx` to an earlier
+  date to get Update, `fallocate` a file in `/data/local/tmp` to run short of room for Replace,
+  and `truncate -s <size>` on a `.part` to see the checksum refuse a damaged file.
 - **The UI tests start the app with `-reading NO`**, which overrides for one launch what the app
   remembers about being inside an article. Without it every test would start where the one before
   it stopped. `testReopensWhereTheReaderLeftOff` relaunches without it.

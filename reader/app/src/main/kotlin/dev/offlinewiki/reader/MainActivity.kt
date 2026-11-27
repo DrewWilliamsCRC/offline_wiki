@@ -16,6 +16,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import wikireader.core.TitleIndex
 
 /**
  * The app's only window: a search screen and a reader screen, one shown at a time, and the
@@ -157,10 +158,33 @@ class MainActivity : Activity() {
         if (downloads != null) return
         currentFocus?.let { (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(it.windowToken, 0) }
         val screen = DownloadScreen(
-            this, openWhenDone = search == null, reading = library?.file?.name, onClose = ::closeDownloads, onReady = ::start,
+            this,
+            openWhenDone = { search == null },
+            reading = { library?.file?.name },
+            letGo = ::letGo,
+            onClose = ::closeDownloads,
+            onReady = ::start,
         )
         downloads = screen
         root.addView(screen.view, MATCH, MATCH)
+    }
+
+    /**
+     * Before files are deleted from the downloads screen: if the Wikipedia open now is among
+     * them, closes it and the screens that show it, keeping the downloads screen. A deleted file
+     * that is still open keeps its space, and the index stays mapped until it is collected.
+     */
+    private fun letGo(names: Set<String>) {
+        val open = library?.file ?: return
+        if (open.name !in names && TitleIndex.fileFor(open).name !in names) return
+        search?.let { root.removeView(it.view); it.close() }
+        reader?.let { root.removeView(it.view); it.close() }
+        release()
+        search = null
+        reader = null
+        library = null
+        history = null
+        Runtime.getRuntime().gc()
     }
 
     private fun closeDownloads() {

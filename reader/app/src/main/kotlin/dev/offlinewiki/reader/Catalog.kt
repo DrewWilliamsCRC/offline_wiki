@@ -60,7 +60,11 @@ class Catalog(val books: List<Book>) {
                             }
                         }
                     },
-                )
+                ).also {
+                    if (it.files.none { file -> file.name.endsWith(".zim") }) {
+                        throw IOException("the list of downloads has no Wikipedia file for ${it.title}")
+                    }
+                }
             })
         } catch (e: JSONException) {
             throw IOException("the list of downloads could not be read (${e.message})")
@@ -81,4 +85,27 @@ object Http {
             setRequestProperty("User-Agent", "WikiReader (Android)")
             if (from > 0) setRequestProperty("Range", "bytes=$from-")
         }
+}
+
+/**
+ * A Kiwix file name, `<book>_<flavor>_<year>-<month>.zim`, taken apart: [book] is the size it is
+ * ("wikipedia_en_all_nopic", as the catalog's ids are), [date] the snapshot ("2026-09").
+ */
+class Snapshot(val book: String, val date: String) {
+    /** "September 2026". */
+    val month: String
+        get() {
+            val (year, number) = date.split("-")
+            return "${MONTHS[number.toInt() - 1]} $year"
+        }
+
+    companion object {
+        private val NAME = Regex("(.+)_([0-9]{4}-(0[1-9]|1[0-2]))\\.zim")
+        private val MONTHS = listOf(
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        )
+
+        fun of(name: String): Snapshot? = NAME.matchEntire(name)?.let { Snapshot(it.groupValues[1], it.groupValues[2]) }
+    }
 }

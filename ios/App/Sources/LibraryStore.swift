@@ -34,11 +34,14 @@ final class LibraryStore: ObservableObject {
         if chosenFolder == nil { chosenFolder = restoreChosenFolder() }
         if let chosenFolder { folders.append(chosenFolder) }
 
-        let candidates = folders.flatMap(zimFiles).sorted { a, b in
-            // Prefer a file that has its index; among those, the biggest (the fullest Wikipedia).
-            if a.hasIndex != b.hasIndex { return a.hasIndex }
-            return a.size > b.size
-        }
+        // Prefer files that have their index. Of each book only its newest snapshot counts, so that
+        // an older copy left beside an update is not read instead, even when it is bigger. Of what
+        // is left, the biggest first: the fullest Wikipedia.
+        let all = folders.flatMap(zimFiles)
+        let indexed = all.contains(where: \.hasIndex) ? all.filter(\.hasIndex) : all
+        let newest = Dictionary(grouping: indexed) { Snapshot($0.url.lastPathComponent)?.book ?? $0.url.lastPathComponent }
+            .values.compactMap { $0.max { (Snapshot($0.url.lastPathComponent)?.date ?? "") < (Snapshot($1.url.lastPathComponent)?.date ?? "") } }
+        let candidates = newest.sorted { $0.size > $1.size }
         if let library, let first = candidates.first, library.stamp == LibraryStore.stamp(of: first.url) {
             library.hold()
             return
@@ -63,6 +66,14 @@ final class LibraryStore: ObservableObject {
     /// Lets go of the files while the app is out of sight, so that they can be replaced: a
     /// deleted file that is still open goes on taking up its space.
     func suspend() { library?.release() }
+
+    /// Before files are deleted from the downloads screen: closes the Wikipedia open now if it is
+    /// among them. `reload` afterwards opens whatever is left.
+    func letGo(of names: Set<String>) {
+        guard let library, names.contains(library.fileName) || names.contains(library.fileName + ".idx") else { return }
+        library.release()
+        state = .missing("")
+    }
 
     private func zimFiles(in folder: URL) -> [(url: URL, size: Int, hasIndex: Bool)] {
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey]

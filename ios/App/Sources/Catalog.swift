@@ -51,6 +51,9 @@ struct Catalog: Codable {
             throw Problem(message: "the list of downloads could not be read")
         }
         guard catalog.format == 1 else { throw Problem(message: "the list of downloads is for a newer Wiki Reader: update the app") }
+        for book in catalog.books where !book.files.contains(where: { $0.name.hasSuffix(".zim") }) {
+            throw Problem(message: "the list of downloads has no Wikipedia file for \(book.title)")
+        }
         for file in catalog.books.flatMap(\.files) {
             let plain = file.name.range(of: #"^[A-Za-z0-9][A-Za-z0-9_.-]*\.zim(\.idx)?$"#, options: .regularExpression) != nil
             let checksum = file.sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
@@ -59,5 +62,26 @@ struct Catalog: Codable {
             }
         }
         return catalog
+    }
+}
+
+/// A Kiwix file name, `<book>_<flavor>_<year>-<month>.zim`, taken apart: `book` is the size it is
+/// ("wikipedia_en_all_nopic", as the catalog's ids are), `date` the snapshot ("2026-09").
+struct Snapshot {
+    let book: String
+    let date: String
+
+    init?(_ name: String) {
+        guard let match = name.wholeMatch(of: /(.+)_([0-9]{4}-(0[1-9]|1[0-2]))\.zim/) else { return nil }
+        book = String(match.1)
+        date = String(match.2)
+    }
+
+    /// "September 2026".
+    var month: String {
+        let parts = date.split(separator: "-")
+        let months = ["January", "February", "March", "April", "May", "June",
+                      "July", "August", "September", "October", "November", "December"]
+        return "\(months[Int(parts[1])! - 1]) \(parts[0])"
     }
 }
