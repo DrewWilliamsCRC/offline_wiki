@@ -42,6 +42,7 @@ jobs:
           /bin/bash -n ci/device.sh
           /bin/bash -n ci/fake-mtp.sh
           /bin/bash -n ios/scripts/testflight-upload.sh
+          /bin/bash -n reader/scripts/play-upload.sh
       - name: Run the script
         run: ./wiki.sh help
 
@@ -55,10 +56,11 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
-      # The APK this makes is signed with a throwaway key, so it cannot update an installed app.
+      # The APK this makes is signed with a throwaway key, so it cannot update an installed app, and
+      # the Play bundle is left unsigned: the upload key is not here.
       - name: Build
         working-directory: reader
-        run: ./gradlew --no-daemon --warning-mode all :indexer:installDist :app:assembleRelease
+        run: ./gradlew --no-daemon --warning-mode all :indexer:installDist :app:assembleRelease :app:bundlePlay
 
   compare:
     name: Kotlin and Swift agree

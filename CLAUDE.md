@@ -60,25 +60,32 @@ WIKI_BOOK=wikipedia_en_top ./wiki.sh fetch nopic           # 2.7 GB; realistic, 
 
 ## The e-reader, and why testing is indirect
 
-The device is a Viwoods AiPaper Reader on Android 14. It shapes most decisions here:
+The device is a Viwoods AiPaper Reader, on Android 16 since late 2026, with the Play Store. It
+shapes most decisions here:
 
 - **adb is useless on it.** It appears in `adb devices`, but its firmware refuses shell commands,
   `adb install` and `adb push`. Nothing can be installed, launched or inspected from the Mac.
-- **Files go over MTP** via the libmtp tools (`mtp-files`, `mtp-sendfile`, ...). The user installs an
-  APK by tapping it in the e-reader's file manager.
+- **Files go over MTP** via the libmtp tools (`mtp-files`, `mtp-sendfile`, ...): Wikipedia and its
+  index into the folder Wiki Reader was given (`Wikipedia` at the top of its storage), an APK into
+  Download, where the user installs it by tapping it in the e-reader's file manager. Since 1.0 the
+  app also comes from Google Play (see "Google Play" below), which installs and updates it.
 - So **test in an emulator before pushing**, and expect each on-device round trip to cost the user
-  manual steps. An Android 14 AVD shaped like the e-reader's screen (824x1648 at 300 dpi) works:
+  manual steps. An Android 16 AVD shaped like the e-reader's screen (824x1648 at 300 dpi) works;
+  `wikitest16` on this Mac (`wikitest` is an Android 14 one, for the oldest behaviour still met):
 
 ```sh
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ADB_MDNS=0
-$ANDROID_HOME/emulator/emulator -avd wikitest -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
-adb -e push data/zim/wikipedia_en_top_nopic_*.zim /sdcard/Download/      # and its .idx
+$ANDROID_HOME/emulator/emulator -avd wikitest16 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
 adb -e install -r data/app/wiki-reader-*.apk
-adb -e shell appops set dev.offlinewiki.reader MANAGE_EXTERNAL_STORAGE allow
-adb -e shell am start -n dev.offlinewiki.reader/.MainActivity
+adb -e shell am start -n dev.offlinewiki.reader/.MainActivity   # then choose its folder: tap through the picker
+adb -e push data/zim/wikipedia_en_top_nopic_*.zim /sdcard/Wikipedia/     # and its .idx; or download in the app
 adb -e exec-out screencap -p > shot.png                                  # then look at it
 adb -e shell settings put system font_scale 1.3                          # reproduces the e-reader's larger text
+adb -e shell sync; adb -e shell reboot -p                                # to stop it: a hard stop loses writes
 ```
+
+  `uiautomator dump` lists what is on screen with its position, for tapping by text through the
+  folder picker and the app's own screens.
 
 `adb` hangs at startup on this Mac unless `ADB_MDNS=0` is set.
 
@@ -115,7 +122,7 @@ and check that it fails without the change.
 
 ```
 Kiwix .zim ──indexer──▶ <file>.zim.idx ─┐
-     │                                   ├─ MTP ─▶ e-reader Download/ ─▶ Wiki Reader
+     │                                   ├─ MTP ─▶ e-reader Wikipedia/ ─▶ Wiki Reader
      └───────────────────────────────────┘
 ```
 
@@ -145,8 +152,13 @@ Things that span files:
   a second file), article length, and capped inbound-redirect count. Redirect titles get a fraction
   of their article's rank. Random uses the rank too: it only picks articles at or above
   `TitleIndex.MIN_ARTICLE_RANK`, which the forwarding pages described below fall under.
-- **The app finds its data by convention**: a `*.zim` in Download (or Documents) with a
-  `<name>.zim.idx` beside it, opened by path. That is why it needs "all files access". Of each
+- **The app finds its data by convention**: a `*.zim` with a `<name>.zim.idx` beside it, in the
+  one folder the reader gave it. On Android that is chosen once through the system's folder
+  picker, which grants that folder alone, with lasting permission (`Folder.kt`): Google Play does
+  not allow "all files access" to an app like this, and Android will not grant the Download folder
+  itself, so the folder is `Wikipedia` at the top of storage, where `push` copies to. Files are
+  reached as documents, by name, and opened from file descriptors, which is why `ZimFile` and
+  `TitleIndex` take a `FileChannel`. On iOS it is the app's Documents folder. Of each
   book (`<book>_<flavor>`, the name without its `_<year>-<month>.zim`) only the newest snapshot
   counts, then the biggest of those wins (`Library.findZim`, `LibraryStore.reload`). Newest before
   biggest, because an update can be smaller than what it replaces (Kiwix's "top" with pictures
@@ -183,7 +195,8 @@ Things that span files:
   offers four sizes; "all, introductions only" (14 GB) and "all, with pictures" (128 GB) await a
   Mac with that much room free. Rules both apps follow:
   - **A file is used only once it is whole and its SHA-256 matches.** Android writes
-    `Download/<name>.part`, carries a stopped one on with an HTTP range, checks it and renames it.
+    `<name>.part` in the folder, carries a stopped one on with an HTTP range from its size as it
+    is then (never a listing kept from a moment before), checks it and renames it.
     iOS uses a background `URLSession`, which carries on with the app suspended and leaves resume
     data when stopped; a file that has arrived waits in Application Support/Downloads until it
     is checked, then moves into Documents. Checking 53 GB takes a minute or more.
@@ -377,6 +390,31 @@ Things to know:
   nested infobox (`infobox-subbox`) or other data, such as the table of neighbouring places some
   `maptable` cells hold (Melbourne).
 
+## Google Play
+
+The Android app is on Google Play's internal testing track: testers are the people added in Play
+Console (up to 100), who install it from the Play Store and get each build automatically.
+
+- **Upload with `reader/scripts/play-upload.sh`** from the main checkout at `origin/main`, as for
+  TestFlight. It builds `:app:bundlePlay` (the `play` build type: the release build, signed with the
+  upload key) and puts it on the internal track through the Play Developer API. Raise
+  `versionCode` (and `versionName`) in `reader/app/build.gradle.kts` for every upload: Play takes
+  each version code once.
+- **Outside the repository**, which is public: the upload key,
+  `~/.android/wiki-reader-upload.jks`, with its password in `~/.android/wiki-reader-upload.properties`
+  (both mode 600; keep a copy somewhere safe, as Play takes uploads only signed with it), and a
+  Google Cloud service account's JSON key, `~/.android/wiki-reader-play.json`, which Play Console
+  (Users and permissions) allows to release to testing tracks. The script makes its token with
+  `openssl`, so it needs no Google tools.
+- **The first build of a new app goes up by hand** in Play Console (Testing, Internal testing,
+  Create new release, the `.aab` from `reader/app/build/outputs/bundle/play/`). The API takes
+  every build after that.
+- **What the listing needs is in `reader/play/`**: `listing.md` (the texts and the answers to the
+  App content declarations), the 512 px icon and 1024x500 feature graphic (drawn from the launcher
+  icon's W), and screenshots from the Android 16 emulator. The privacy policy is `PRIVACY.md`.
+- **No "all files access"** (see "The app finds its data by convention"): Play grants it only to
+  file managers and the like.
+
 ## Conventions and constraints
 
 - **`wiki.sh` targets macOS's bash 3.2**: no associative arrays, `mapfile`, or `${var,,}`.
@@ -407,10 +445,19 @@ Things to know:
 - To check a toolchain upgrade, build the indexes with the old and new indexer and `cmp` them
   (the build is deterministic, so they must be byte-identical), diff `search` and `cat` output, and
   compare emulator screenshots of the old and new APK.
-- `zstd-jni` is pinned to 1.5.7-4, the newest release whose `.aar` builds against `compileSdk` 34.
+- `zstd-jni` is pinned to 1.5.7-4: its native libraries are aligned for 16 KB pages, which Play
+  requires, and its `.aar` asks for no particular `compileSdk`; later 1.5.7 releases ask for 37.
   `core` depends on it `compileOnly`; the app supplies the `.aar`, the indexer the plain jar.
-- The APK is signed with this Mac's Android debug key and named after its content hash. A build
-  signed elsewhere cannot update the installed app.
+- **The app targets Android 16 (API 36)**, as Play requires of a new app. What that changed: the
+  app draws edge to edge, and `MainActivity` pads its root by the system bars and the keyboard;
+  Back arrives through an `OnBackInvokedCallback` (Android 16 no longer calls `onBackPressed`);
+  and Android gives a `dataSync` foreground service six hours a day, after which
+  `DownloadService.onTimeout` pauses the download and Carry on resumes it.
+- The sideloaded APK (`./wiki.sh app`) is signed with this Mac's Android debug key and named after
+  its content hash; a build signed elsewhere cannot update the installed app. The Play build is
+  signed with the upload key and installed signed with Google's, so a copy from Play and a
+  sideloaded one cannot update each other: switching between them means uninstalling (the
+  Wikipedia folder stays).
 - **`main` is protected.** Every change needs a pull request (no approvals required), including
   from the owner; force-pushes, deletion and merge commits are blocked. Work on a branch, then
   `gh pr create` and `gh pr merge --rebase --delete-branch`. Wait to be asked before opening or
