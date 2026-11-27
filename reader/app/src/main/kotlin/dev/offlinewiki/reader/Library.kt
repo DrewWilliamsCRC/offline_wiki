@@ -165,9 +165,13 @@ class Library private constructor(val file: File, private val stamp: String) {
             val shared = Environment.getExternalStorageDirectory()
             val folders = listOfNotNull(File(shared, "Download"), File(shared, "Documents"), shared, context.getExternalFilesDir(null))
             val zims = folders.flatMap { it.listFiles { f -> f.isFile && f.name.endsWith(".zim") }?.toList() ?: emptyList() }
-            // Prefer a file that has its index; among those, the biggest (the fullest Wikipedia).
-            return zims.sortedWith(compareByDescending<File> { TitleIndex.fileFor(it).isFile }.thenByDescending { it.length() })
-                .firstOrNull()
+            // Prefer a file that has its index. Of each book only its newest snapshot counts, so
+            // that an older copy left beside an update is not read instead, even when it is bigger.
+            // Of what is left, the biggest: the fullest Wikipedia.
+            val indexed = zims.filter { TitleIndex.fileFor(it).isFile }.ifEmpty { zims }
+            return indexed.groupBy { Snapshot.of(it.name)?.book ?: it.name }.values
+                .map { snapshots -> snapshots.maxBy { Snapshot.of(it.name)?.date ?: "" } }
+                .maxByOrNull { it.length() }
         }
     }
 }

@@ -26,8 +26,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.offlinewiki.reader
         INFOPLIST_FILE: App/Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: "0.5"
-        CURRENT_PROJECT_VERSION: "5"
+        MARKETING_VERSION: "0.6"
+        CURRENT_PROJECT_VERSION: "6"
         TARGETED_DEVICE_FAMILY: "1,2" # iPhone and iPad
         SWIFT_VERSION: "5.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

@@ -166,22 +166,41 @@ Things to know:
 Both apps can fetch Wikipedia and its index themselves, which is how someone without this Mac gets
 them: on Android, the **Downloads** line at the end of the recently-read list, or **Download
 Wikipedia** when there is none yet; on iPhone and iPad, the download button at the top of the
-search screen, or **Download Wikipedia…** at first. They offer:
+search screen, or **Download Wikipedia…** at first.
 
-- **All of English Wikipedia**: every article, without pictures, about 54 GB.
-- **English Wikipedia's best-known articles**: about 3 GB, a quick start on a small device. With
-  both, the app reads the bigger one.
+They offer the sizes Kiwix publishes, from all of English Wikipedia to a small start:
+
+| Size | What is in it | About |
+|---|---|---|
+| All of English Wikipedia, with pictures | every article in full, with its pictures | 128 GB |
+| All of English Wikipedia | every article in full, without pictures | 54 GB |
+| All of English Wikipedia, introductions only | the opening paragraphs of every article | 14 GB |
+| Best-known articles, with pictures | the most-read articles in full, with pictures | 7 GB |
+| Best-known articles | the most-read articles in full, without pictures | 3 GB |
+| Best-known articles, introductions only | the opening paragraphs of the most-read articles | 0.3 GB |
+
+The app shows the ones that are available now (see below). With more than one on the device, it
+reads the biggest; e-ink screens show pictures in grey.
+
+**Updates.** Kiwix publishes new snapshots every few months. When the Downloads screen knows of a
+newer one than the device has, it says so and offers **Update**: the new copy downloads beside the
+old, which is deleted once the new one is checked and in place. If there is not room for both,
+it offers **Replace** instead, which deletes the old one first, after asking. **Delete** removes a
+size from the device, also after asking.
 
 Wikipedia comes from Kiwix, and the index from this repository's
 [downloads](https://github.com/DrewWilliamsCRC/offline_wiki/releases/tag/downloads) release. Each
 file is checked against its SHA-256 before the app uses it. Downloads use Wi-Fi only, carry on
 with the app in the background, and pick up where they stopped if interrupted; the app checks
 first that there is room. The full Wikipedia takes an hour or more, depending on the connection;
-the small one, a few minutes.
+the small ones, a few minutes.
 
-What is on offer is the snapshot on this Mac: after `./wiki.sh update` (or `fetch` and `index`),
-`./wiki.sh publish` uploads its index and the list the apps read. It needs the GitHub CLI (`gh`),
-signed in to an account that can write to this repository.
+What is on offer is up to `./wiki.sh publish` on this Mac. It looks for Kiwix's newest snapshot of
+each size, builds the index of any that has none yet (downloading it for that, then deleting it
+again), and uploads the indexes and the list the apps read. Run it after Kiwix publishes, and the
+apps offer the update. A size this Mac has no room to download is skipped, with a note saying how
+much it needs. It needs the GitHub CLI (`gh`), signed in to an account that can write to this
+repository.
 
 ## Other sizes
 

@@ -46,10 +46,18 @@ struct RootView: View {
             default: break
             }
         }
-        // A first Wikipedia that has just arrived is opened at once. One that arrives while
-        // another is open waits for the reader to choose Open, so as not to pull them out of it.
+        // A first Wikipedia that has just arrived is opened at once, in place of the downloads
+        // screen. One that arrives while another is open waits for the reader to choose Open, so
+        // as not to pull them out of it.
         .onChange(of: downloads.arrivals) { _ in
-            if case .missing = store.state { store.reload() }
+            if case .missing = store.state {
+                store.reload()
+                if case .ready = store.state { downloads.showing = false }
+            }
+        }
+        // Here rather than on the screens beneath, which can change while it is up.
+        .sheet(isPresented: $downloads.showing) {
+            NavigationStack { DownloadsView() }
         }
     }
 }
@@ -58,16 +66,16 @@ struct RootView: View {
 struct SetupView: View {
     let reason: String
     @EnvironmentObject private var store: LibraryStore
+    @EnvironmentObject private var downloads: Downloads
     @State private var choosingFolder = false
-    @State private var showingDownloads = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Wiki Reader").font(.largeTitle.bold())
                 Text(reason)
-                Text("Download Wikipedia here, over Wi-Fi: about 3 GB for its best-known articles, 54 GB for all of it.")
-                Button("Download Wikipedia…") { showingDownloads = true }
+                Text("Download Wikipedia here, over Wi-Fi. It comes in several sizes, from under 1 GB to over 50 GB.")
+                Button("Download Wikipedia…") { downloads.showing = true }
                     .buttonStyle(.borderedProminent)
                 Text("Or copy two files into this app's folder: the Wikipedia file (ending in .zim) and its index (ending in .zim.idx).")
                 Text("From a Mac: connect this device, select it in the Finder, open the Files tab and drag both files onto Wiki Reader.")
@@ -83,8 +91,6 @@ struct SetupView: View {
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             if case .success(let folder) = result { store.choose(folder: folder) }
         }
-        .sheet(isPresented: $showingDownloads) {
-            NavigationStack { DownloadsView() }
-        }
+
     }
 }

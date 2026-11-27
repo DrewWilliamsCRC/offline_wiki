@@ -205,7 +205,10 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 15))
         app.buttons["Downloads"].tap()
         XCTAssertTrue(app.staticTexts["All of English Wikipedia"].waitForExistence(timeout: 30), "the list of downloads did not load")
-        XCTAssertTrue(app.staticTexts["English Wikipedia's best-known articles"].exists)
+        XCTAssertTrue(app.staticTexts["Best-known articles"].exists)
+        // The smallest is last, and on a phone below the fold.
+        for _ in 0..<6 where !app.staticTexts["Best-known articles, introductions only"].exists { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Best-known articles, introductions only"].exists, "the sizes are not all offered")
         // WIKI_DIR is not where downloads go, so neither counts as on this device unless downloaded.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", " GB")).count >= 2, "no sizes shown")
         shot("16-downloads")

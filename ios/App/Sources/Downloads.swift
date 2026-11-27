@@ -10,6 +10,10 @@ import UIKit
 /// SHA-256 matches the catalog's; only then does it move into Documents. A download that stops
 /// (paused, or the app swiped away) leaves resume data there too, and carries on from it the next
 /// time. The Android app does the same in its own way (Downloads.kt).
+///
+/// A book's older snapshots in Documents (the same `<book>_<flavor>`, an earlier date) are an
+/// update's to replace: once the new one is in place they are deleted. `LibraryStore` reads only
+/// the newest anyway.
 @MainActor
 final class Downloads: NSObject, ObservableObject {
     static let shared = Downloads()
@@ -24,6 +28,9 @@ final class Downloads: NSObject, ObservableObject {
     @Published private(set) var done: Int64 = 0
     /// Goes up each time a book has arrived whole, for the screens that wait for one.
     @Published private(set) var arrivals = 0
+    /// Whether the downloads screen is up. It is shown over whatever is beneath, which can change
+    /// while it is up: a first Wikipedia arrives, or the open one is deleted.
+    @Published var showing = false
 
     /// Given by iOS when it wakes the app for this session's events; called once they are handled.
     var backgroundEventsDone: (() -> Void)?
@@ -83,6 +90,69 @@ final class Downloads: NSObject, ObservableObject {
         size(of: documents.appendingPathComponent(file.name)) == file.size
     }
 
+    static func zim(of book: Catalog.Book) -> Catalog.Remote { book.files.last { $0.name.hasSuffix(".zim") }! }
+
+    static func snapshot(of book: Catalog.Book) -> Snapshot? { Snapshot(zim(of: book).name) }
+
+    /// Wikipedia files of `book` in Documents that are older snapshots than the catalog's, newest first.
+    func older(_ book: Catalog.Book) -> [URL] {
+        guard let date = Downloads.snapshot(of: book)?.date else { return [] }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: Downloads.documents.path)) ?? []
+        return names.filter { name in
+            guard let snapshot = Snapshot(name) else { return false }
+            return snapshot.book == book.id && snapshot.date < date
+        }.sorted(by: >).map { Downloads.documents.appendingPathComponent($0) }
+    }
+
+    /// A Wikipedia file with its index.
+    private static func withIndex(_ zim: URL) -> [URL] { [zim, URL(fileURLWithPath: zim.path + ".idx")] }
+
+    /// Every file `delete` would remove for `book`: all its snapshots, with their indexes.
+    func files(of book: Catalog.Book) -> [URL] {
+        older(book).flatMap(Downloads.withIndex) + book.files.map { Downloads.documents.appendingPathComponent($0.name) }
+    }
+
+    /// Deletes `book`'s older snapshots: to make room for the new one, or once it is in place.
+    func deleteOlder(_ book: Catalog.Book) {
+        for url in older(book).flatMap(Downloads.withIndex) { try? FileManager.default.removeItem(at: url) }
+    }
+
+    /// Deletes all of `book` that is here, and anything of it on the way.
+    func delete(_ book: Catalog.Book) {
+        if self.book?.id == book.id {
+            stopTransfers()
+            running = false
+            doing = ""
+            problem = nil
+            received = [:]
+            save()
+        }
+        for url in files(of: book) { try? FileManager.default.removeItem(at: url) }
+        for file in book.files {
+            try? FileManager.default.removeItem(at: Downloads.arrived(file.name))
+            try? FileManager.default.removeItem(at: Downloads.resumeData(file.name))
+        }
+    }
+
+    private func olderSize(_ book: Catalog.Book) -> Int64 {
+        older(book).flatMap(Downloads.withIndex).reduce(0) { $0 + max(0, Downloads.size(of: $1)) }
+    }
+
+    private static var free: Int64 {
+        let values = try? documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        return values?.volumeAvailableCapacityForImportantUsage ?? .max
+    }
+
+    /// Whether `book` can be downloaded beside what is here, leaving a margin free.
+    func roomFor(_ book: Catalog.Book) -> Bool { Downloads.free >= book.size - have(book) + Downloads.margin }
+
+    /// Whether `book` would fit if its older snapshots were deleted first.
+    func roomIfReplaced(_ book: Catalog.Book) -> Bool {
+        Downloads.free + olderSize(book) >= book.size - have(book) + Downloads.margin
+    }
+
+    private static let margin: Int64 = 100_000_000 // left free, so the device is not filled to the brim
+
     /// Whether all of `book` is in Documents, each file at its full size.
     func complete(_ book: Catalog.Book) -> Bool { book.files.allSatisfy(Downloads.isHere) }
 
@@ -104,9 +174,9 @@ final class Downloads: NSObject, ObservableObject {
         self.book = book
         if let data = try? JSONEncoder().encode(book) { UserDefaults.standard.set(data, forKey: Downloads.bookKey) }
 
-        let needed = book.size - have(book) + 100_000_000 // left free, so the device is not filled to the brim
-        let values = try? Downloads.documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        if let free = values?.volumeAvailableCapacityForImportantUsage, free < needed {
+        let needed = book.size - have(book) + Downloads.margin
+        let free = Downloads.free
+        if free < needed {
             fail("There is not enough room: this needs \(Downloads.gb(needed)) more, and \(Downloads.gb(free)) is free.")
             return
         }
@@ -174,6 +244,7 @@ final class Downloads: NSObject, ObservableObject {
         guard let book else { return }
         done = have(book)
         if complete(book), doing != "Done" {
+            deleteOlder(book) // an update: the new snapshot is in place and checked
             running = false
             doing = "Done"
             received = [:]
@@ -200,6 +271,12 @@ final class Downloads: NSObject, ObservableObject {
                 checking.remove(file.name)
                 switch result {
                 case .success:
+                    // On the disk before it takes its name: a device that loses power just after
+                    // must not be left with an empty file that looks finished.
+                    if let handle = try? FileHandle(forUpdating: Downloads.arrived(file.name)) {
+                        try? handle.synchronize()
+                        try? handle.close()
+                    }
                     let target = Downloads.documents.appendingPathComponent(file.name)
                     try? FileManager.default.removeItem(at: target)
                     do {

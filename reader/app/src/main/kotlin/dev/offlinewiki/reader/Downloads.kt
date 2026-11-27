@@ -33,6 +33,9 @@ import kotlin.concurrent.thread
  * matches the catalog. A `.part` left by a stopped download is carried on from where it ended,
  * with an HTTP range, the next time. The index comes before Wikipedia: alone it is harmless, as
  * the app looks for a .zim, and the .zim then arrives last, complete.
+ *
+ * A book's older snapshots (the same `<book>_<flavor>`, an earlier date) are an update's to
+ * replace: once the new one is in place they are deleted. [Library] reads only the newest anyway.
  */
 object Downloads {
     /** What is going on, for the screens. [done] and [total] are bytes of the whole book. */
@@ -57,6 +60,43 @@ object Downloads {
 
     private fun target(file: Catalog.Remote) = File(folder, file.name)
     private fun part(file: Catalog.Remote) = File(folder, file.name + ".part")
+
+    /** The Wikipedia file of [book], as opposed to its index. */
+    fun zimOf(book: Catalog.Book): Catalog.Remote = book.files.last { it.name.endsWith(".zim") }
+
+    fun snapshotOf(book: Catalog.Book): Snapshot? = Snapshot.of(zimOf(book).name)
+
+    /** Wikipedia files of [book] here that are older snapshots than the catalog's, newest first. */
+    fun older(book: Catalog.Book): List<File> {
+        val date = snapshotOf(book)?.date ?: return emptyList()
+        return (folder.listFiles() ?: emptyArray()).filter { f ->
+            val snapshot = Snapshot.of(f.name)
+            f.isFile && snapshot != null && snapshot.book == book.id && snapshot.date < date
+        }.sortedByDescending { it.name }
+    }
+
+    /** A Wikipedia file with everything that goes with it: its index, and parts of either. */
+    private fun withCompanions(zim: File): List<File> =
+        listOf("", ".idx", ".part", ".idx.part").map { File(zim.path + it) }
+
+    /** Every file [deleteOlder] or [delete] would remove for [book], whether there or not. */
+    fun filesOf(book: Catalog.Book, older: Boolean = true): List<File> =
+        (if (older) older(book) else emptyList()).flatMap(::withCompanions) + withCompanions(target(zimOf(book)))
+
+    /** Deletes [book]'s older snapshots, to make room for the new one or once it is in place. */
+    fun deleteOlder(book: Catalog.Book) = older(book).flatMap(::withCompanions).forEach { it.delete() }
+
+    /** Deletes all of [book] that is here: every snapshot of it, and any part. */
+    fun delete(book: Catalog.Book) = filesOf(book).forEach { it.delete() }
+
+    /** Bytes the older snapshots of [book] take up, index and all. */
+    fun olderSize(book: Catalog.Book): Long = older(book).flatMap(::withCompanions).sumOf { it.length() }
+
+    /** Whether [book] can be downloaded beside what is here, leaving the margin free. */
+    fun roomFor(book: Catalog.Book): Boolean = folder.usableSpace >= book.size - have(book) + MARGIN
+
+    /** Whether [book] would fit if its older snapshots were deleted first. */
+    fun roomIfReplaced(book: Catalog.Book): Boolean = folder.usableSpace + olderSize(book) >= book.size - have(book) + MARGIN
 
     /** Whether all of [book] is here: each file at its full size. One copied over USB counts too. */
     fun complete(book: Catalog.Book): Boolean = book.files.all { target(it).length() == it.size }
@@ -95,8 +135,12 @@ object Downloads {
                 if (stopping) break
                 check(book, file)
                 if (stopping) break
+                // On the disk before it takes its name: a device that loses power just after
+                // must not be left with an empty file that looks finished.
+                FileOutputStream(part(file), true).use { it.fd.sync() }
                 if (!part(file).renameTo(target(file))) throw IOException("${file.name} could not be put in place")
             }
+            if (!stopping) deleteOlder(book) // an update: the new snapshot is in place and checked
             status = when {
                 stopping -> Status(book, "Paused", have(book), book.size)
                 else -> Status(book, "Done", book.size, book.size)

@@ -1,7 +1,8 @@
 import XCTest
 
-/// Downloads Wikipedia in the app for real: the smallest book in the catalog (about 3 GB), from
-/// Kiwix and from this repository's "downloads" release. So it runs only when asked:
+/// Downloads Wikipedia in the app for real: the best-known articles (about 3 GB, big enough to
+/// pause on the way), from Kiwix and from this repository's "downloads" release. So it runs only
+/// when asked:
 ///   xcrun simctl uninstall <simulator> dev.offlinewiki.reader      # a fresh app, with nothing in it
 ///   TEST_RUNNER_DOWNLOAD=1 xcodebuild test ... -only-testing:WikiReaderUITests/DownloadUITests
 /// TEST_RUNNER_SHOT_DIR writes screenshots, as for the other tests. Allow ten minutes or more.
@@ -23,13 +24,14 @@ final class DownloadUITests: XCTestCase {
         openDownloads()
         XCTAssertTrue(app.staticTexts["All of English Wikipedia"].exists, "the full Wikipedia is not on offer")
         let button = app.buttons["action-\(book)"]
+        XCTAssertTrue(reach(button), "the book is not on offer")
         XCTAssertEqual(button.label, "Download", "the small Wikipedia is already here: uninstall the app first")
         shot("d1-offered")
 
         // It starts, and says how far it has got: the index first, then Wikipedia.
         button.tap()
         wait(for: button, label: "Pause", timeout: 30)
-        XCTAssertTrue(text(beginningWith: "Downloading Wikipedia: ").waitForExistence(timeout: 120), "no progress shown")
+        XCTAssertTrue(text(beginningWith: "Downloading").waitForExistence(timeout: 120), "no progress shown")
         shot("d2-downloading")
 
         // Paused, it keeps what has arrived, and carries on from there.
@@ -45,6 +47,7 @@ final class DownloadUITests: XCTestCase {
         app.terminate()
         app.launch()
         openDownloads()
+        reach(button)
         if button.label == "Carry on" { button.tap() }
         wait(for: button, label: "Pause", timeout: 30)
 
@@ -59,9 +62,9 @@ final class DownloadUITests: XCTestCase {
 
         // The downloads screen now has it on the device, with nothing to do.
         app.buttons["Downloads"].tap()
-        XCTAssertTrue(app.staticTexts["English Wikipedia's best-known articles"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.staticTexts["On this device."].exists, "the book is not shown as on the device")
-        XCTAssertFalse(button.exists, "a book on the device still offers a button")
+        XCTAssertTrue(reach(button))
+        XCTAssertTrue(text(beginningWith: "On this device: ").exists, "the book is not shown as on the device")
+        XCTAssertEqual(button.label, "Delete", "a book on the device offers no way to delete it")
         shot("d5-on-device")
         app.buttons["Done"].tap()
 
@@ -76,8 +79,19 @@ final class DownloadUITests: XCTestCase {
         let start = app.buttons["Download Wikipedia…"]
         XCTAssertTrue(start.waitForExistence(timeout: 15), "the app does not offer a download")
         start.tap()
-        XCTAssertTrue(app.staticTexts["English Wikipedia's best-known articles"].waitForExistence(timeout: 30),
+        XCTAssertTrue(app.staticTexts["All of English Wikipedia"].waitForExistence(timeout: 30),
                       "the list of downloads did not load")
+    }
+
+    /// Scrolls down until `element` is on screen, once the list has loaded: a list only makes the
+    /// rows it shows, and the smaller sizes come last.
+    @discardableResult
+    private func reach(_ element: XCUIElement, timeout: TimeInterval = 30) -> Bool {
+        guard app.staticTexts["All of English Wikipedia"].waitForExistence(timeout: timeout) else { return false }
+        for _ in 0..<8 where !(element.exists && element.isHittable) {
+            app.swipeUp()
+        }
+        return element.exists && element.isHittable
     }
 
     private func text(beginningWith prefix: String) -> XCUIElement {
