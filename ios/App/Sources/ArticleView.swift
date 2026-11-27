@@ -2,7 +2,8 @@ import SwiftUI
 import WikiCore
 
 /// One article, with back/forward through the articles reached from it, a menu of its sections
-/// and a text size control. `position` is how far down it to start: 0 for the top, up to 1.
+/// and a text size control, and a menu to find a word in it, share it or open it on
+/// wikipedia.org. `position` is how far down it to start: 0 for the top, up to 1.
 struct ArticleView: View {
     let article: Library.Article
     let position: Double
@@ -24,6 +25,18 @@ struct ArticleView: View {
             .navigationTitle(web.title ?? article.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // The bottom bar is full, so these go in a menu in the navigation bar.
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button { web.find() } label: { Label("Find in Article", systemImage: "magnifyingglass") }
+                        if let address = web.onlineAddress, let article = web.article {
+                            ShareLink(item: address, subject: Text(article.title)) { Label("Share", systemImage: "square.and.arrow.up") }
+                            Button { web.openOnline() } label: { Label("Open on Wikipedia", systemImage: "safari") }
+                        }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
+                }
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button { web.goBack() } label: { Label("Previous article", systemImage: "chevron.backward") }
                         .disabled(!web.canGoBack)
