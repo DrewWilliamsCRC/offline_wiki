@@ -41,6 +41,7 @@ jobs:
           /bin/bash -n ci/compare.sh
           /bin/bash -n ci/device.sh
           /bin/bash -n ci/fake-mtp.sh
+          /bin/bash -n ios/scripts/testflight-upload.sh
       - name: Run the script
         run: ./wiki.sh help
 
