@@ -16,6 +16,8 @@ targets:
     sources:
       - App/Sources
       - App/Assets.xcassets
+      - path: App/PrivacyInfo.xcprivacy # App Store Connect checks it; see TestFlight in CLAUDE.md
+        buildPhase: resources
     dependencies:
       - package: WikiCore
         product: WikiCore

@@ -215,6 +215,38 @@ Installing over the app keeps its Documents folder, so the 53 GB file is not cop
 a device; otherwise the installed build cannot be told from the one before it. Installing changes
 the user's own phone, so ask first.
 
+**TestFlight.** The app also ships through TestFlight, internal testing only: testers are App Store
+Connect users on the owner's team (at most 100), and no Beta App Review is involved. Its App Store
+Connect record is for bundle ID `dev.offlinewiki.reader`, which can never be changed. The setup
+copies the one the owner's Lighthouse Mobile app uses, on the same team.
+
+- **Upload with `ios/scripts/testflight-upload.sh`** from the main checkout at `origin/main`: it
+  refuses another branch, a stale checkout or uncommitted changes in `ios/`. It generates the
+  project, then archives and uploads with `xcodebuild` and an App Store Connect API key, so the
+  Xcode app's own sign-in is not needed. The options are in `ios/ExportOptions-TestFlight.plist`.
+  Xcode raises the uploaded build's number past the last upload (`manageAppVersionAndBuildNumber`);
+  raise `MARKETING_VERSION` for a new version as before.
+- **The key and the team id stay outside the repository**, which is public:
+  `~/.appstoreconnect/private_keys/AuthKey_<key id>.p8` (mode 600), and `ASC_KEY_ID`,
+  `ASC_ISSUER_ID` and `DEVELOPMENT_TEAM` in `~/.appstoreconnect/wiki-reader.env`. It is a Team key
+  with the Admin role (Users and Access, Integrations, App Store Connect API), so the same key
+  serves every app on the team. Never commit either file or paste the `.p8` into a chat. The export
+  options name no team: the export uses the one the archive was signed for.
+- **An API key cannot create the App Store Connect record.** It is made once on the website (Apps,
+  +, New App), choosing the bundle ID from the list; until then an upload is refused. Testers are added there too: TestFlight, an
+  internal group with access to every build, and its members, each already a user of the team.
+- **A build stops opening 90 days after its upload.** Upload a new one before then, even with no
+  change.
+- **The privacy manifest** is `ios/App/PrivacyInfo.xcprivacy`. App Store Connect wants a reason for
+  each "required reason" API: it declares `UserDefaults` (`CA92.1`) and file timestamps (`C617.1`
+  for the Documents folder, `3B52.1` for a folder the reader picked), which `LibraryStore.stamp`
+  and the `fstat` in `TitleIndex` use. Using another such API (system boot time, disk space, the
+  active keyboards) means adding it there.
+- **`ITSAppUsesNonExemptEncryption` is `NO`** (`ios/App/Info.plist`): the app has no networking and
+  no encryption at all. Adding some means answering Apple's export questions again.
+- **Not in CI.** Uploading from CI would need the API key on the runner. CI does check that the
+  script parses.
+
 ```sh
 cd ios && swift build -c release          # WikiCore + wikicheck; needs only the command-line tools
 W=ios/.build/release/wikicheck; K=reader/indexer/build/install/indexer/bin/indexer

@@ -173,6 +173,13 @@ It passes its tests in the iPhone and iPad simulators against the full Wikipedia
 an iPhone with that file on board. `./wiki.sh` does not build or install it; the steps are by hand
 and need Xcode and XcodeGen.
 
+**Through TestFlight.** The repository's owner uploads builds with
+[ios/scripts/testflight-upload.sh](ios/scripts/testflight-upload.sh), for internal testing only:
+the testers are people on the owner's App Store Connect team, who get an email invitation. Install
+**TestFlight** from the App Store, open the invitation and tap **Install**, and turn on Automatic
+Updates for Wiki Reader there. A TestFlight build stops opening 90 days after it was uploaded. It
+and a build installed from Xcode replace each other, and either way the app keeps its files.
+
 **On your own iPhone or iPad.** Sign in to Xcode with your Apple ID (Settings, Accounts), pair the
 device with the Mac, and switch on Developer Mode on the device (Settings, Privacy & Security). Then
 build with your team's id and install:
