@@ -8,7 +8,9 @@ struct ArticleView: View {
     let article: Library.Article
     let position: Double
     @StateObject private var web: WebController
+    /// The reader's choice, as a percent of the system's text size (Settings, Display, Text Size).
     @AppStorage("textSize") private var textSize = 100
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showingSections = false
 
     private static let sizes = [80, 90, 100, 115, 130, 150, 175, 200]
@@ -58,8 +60,37 @@ struct ArticleView: View {
                     web.jump(to: section)
                 }
             }
-            .onAppear { web.open(article.path, textSize: textSize, position: position) }
-            .onChange(of: textSize) { web.setTextSize($0) }
+            .onAppear { web.open(article.path, textSize: shownSize, position: position) }
+            .onChange(of: textSize) { _ in web.setTextSize(shownSize) }
+            .onChange(of: dynamicTypeSize) { _ in web.setTextSize(shownSize) }
+    }
+
+    /// What the article is shown at, as a percent of WebKit's own size: the reader's choice on top
+    /// of the system's text size, as the rest of the app follows it.
+    private var shownSize: Int { ArticleView.shown(textSize, at: dynamicTypeSize) }
+
+    private static func shown(_ chosen: Int, at size: DynamicTypeSize) -> Int {
+        let category = UIContentSizeCategory(size)
+        // Capped: at the largest accessibility sizes tables and infoboxes are the first to give way.
+        return min(400, Int((Double(chosen) * systemScale(category)).rounded()))
+    }
+
+    /// How much bigger than the standard size the system's body text is: 1 at the standard size.
+    private static func systemScale(_ category: UIContentSizeCategory) -> Double {
+        let traits = UITraitCollection(preferredContentSizeCategory: category)
+        return UIFontMetrics(forTextStyle: .body).scaledValue(for: 17, compatibleWith: traits) / 17
+    }
+
+    /// Until 0.7 the size chosen was a percent of WebKit's own, whatever the system's text size.
+    /// Converted once, to the nearest step, so that what someone already reads at does not jump.
+    static func adoptSystemTextSize() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: "textSizeFollowsSystem") else { return }
+        defaults.set(true, forKey: "textSizeFollowsSystem")
+        guard let chosen = defaults.object(forKey: "textSize") as? Int else { return }
+        let wanted = Double(chosen) / systemScale(UIApplication.shared.preferredContentSizeCategory)
+        let nearest = sizes.min { abs(Double($0) - wanted) < abs(Double($1) - wanted) }!
+        defaults.set(nearest, forKey: "textSize")
     }
 
     private func step(_ direction: Int) {
