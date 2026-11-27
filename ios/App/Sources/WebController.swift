@@ -15,6 +15,9 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
     @Published private(set) var canGoForward = false
     /// The headings of the article on screen, for the sections menu; empty while a page loads.
     @Published private(set) var sections: [ArticleSections.Section] = []
+    /// The article on screen, as filed in the reading history: nil while a page loads, and for the
+    /// "Not found" page and the tiny pages that only forward to another article.
+    @Published private(set) var article: Library.Article?
 
     let webView: WKWebView
     private let library: Library
@@ -39,6 +42,8 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
         super.init()
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+        // The system's own find bar: "Find in Article" opens it.
+        webView.isFindInteractionEnabled = true
         webView.scrollView.delegate = self
         // The title is watched rather than read when a page finishes: now and then the web view
         // says a page has finished a moment before it knows the page's title.
@@ -59,6 +64,33 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
 
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
+
+    /// Opens the system's find bar over the article.
+    func find() { webView.findInteraction?.presentFindNavigator(showingReplace: false) }
+
+    /// The article on screen at its own address on wikipedia.org, for sharing it or reading it
+    /// online: the path in the file is the title as Wikipedia spells it in its addresses, and the
+    /// file's name says the language (`wikipedia_en_...`). Nil when there is no article, or the
+    /// file's name says no language.
+    var onlineAddress: URL? {
+        guard let article else { return nil }
+        let parts = library.fileName.split(separator: "_")
+        guard parts.count >= 2, parts[0] == "wikipedia", parts[1].allSatisfy({ $0.isLetter || $0 == "-" }) else { return nil }
+        var address = URLComponents()
+        address.scheme = "https"
+        address.host = "\(parts[1]).wikipedia.org"
+        // The path is percent-encoded here, "?" and "#" included, which a title may hold.
+        address.percentEncodedPath = "/wiki/" + (article.path.addingPercentEncoding(withAllowedCharacters: WebController.pathCharacters) ?? article.path)
+        return address.url
+    }
+
+    /// What may stand unencoded in a path on wikipedia.org: letters, digits and a few marks, not "/".
+    private static let pathCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~!$&'()*+,;=:@"))
+
+    /// Opens the article on screen on wikipedia.org, in the system browser.
+    func openOnline() {
+        if let address = onlineAddress { openExternally(address) }
+    }
 
     func setTextSize(_ percent: Int) {
         server.textSize = percent
@@ -100,6 +132,7 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         sections = []
+        article = nil
         finished = false // the title stays the last page's until this one's arrives
     }
 
@@ -140,6 +173,7 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
         let path = WikiAddress.path(of: url)
         if !path.isEmpty, title != ArticleServer.missingTitle, !server.isForwarding(path) {
             history.add(path: path, title: title)
+            article = Library.Article(title: title, path: path)
         }
     }
 
