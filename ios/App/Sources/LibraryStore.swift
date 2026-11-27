@@ -28,6 +28,7 @@ final class LibraryStore: ObservableObject {
     /// app comes to the front, since that is when files have been added, replaced or removed. If
     /// they are the ones already in use, nothing changes and the reader stays where it was.
     func reload() {
+        LibraryStore.keepOutOfBackups(in: LibraryStore.documents)
         var folders = [LibraryStore.documents]
         // For development: point a simulator build straight at a folder of test files on the Mac.
         if let override = ProcessInfo.processInfo.environment["WIKI_DIR"] { folders.insert(URL(fileURLWithPath: override), at: 0) }
@@ -61,6 +62,27 @@ final class LibraryStore: ObservableObject {
             }
         }
         state = .missing(problem)
+    }
+
+    /// Marks Wikipedia and its index in `folder` as not to be backed up. iOS backs up Documents to
+    /// iCloud and to a computer by default, and a 53 GB file that can be downloaded again would use
+    /// the reader's iCloud storage, or make the backup fail for want of it. Done each time the files
+    /// are looked for, so that files dragged in from the Finder, or replaced, are marked too. A
+    /// folder the reader chose is theirs, and left alone. The mark is an extended attribute: it
+    /// changes neither the size nor the date that `stamp` reads.
+    nonisolated static func keepOutOfBackups(in folder: URL) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        for name in names where name.hasSuffix(".zim") || name.hasSuffix(".zim.idx") {
+            keepOutOfBackups(folder.appendingPathComponent(name))
+        }
+    }
+
+    nonisolated static func keepOutOfBackups(_ url: URL) {
+        var url = url
+        guard (try? url.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup != true else { return }
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
     }
 
     /// Lets go of the files while the app is out of sight, so that they can be replaced: a
