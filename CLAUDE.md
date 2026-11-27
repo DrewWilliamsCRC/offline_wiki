@@ -146,7 +146,11 @@ Things that span files:
   both.** Changing it invalidates existing indexes without changing their version.
 - **Search** is binary search for the query's prefix range, then the best-ranked entries of that
   range via stored block maxima (`TitleIndex.Ranks`), in three passes: titles starting with the
-  query, titles with a later word starting with it, then all words in any order.
+  query, titles with a later word starting with it, then all words in any order. A search that
+  still has fewer than eight results adds up to eight near misses (`TitleIndex.nearMisses`):
+  every spelling one slip from the query (a letter dropped, added, changed, or two swapped, the
+  first letter kept), each looked up as a title prefix. It needs nothing new in the index, and
+  takes about 0.15 ms a search in Swift on this Mac, on the full file.
 - **Ranking** is decided at build time in `IndexBuilder.rankArticles`. The ZIM has no page-view
   data, so rank comes from membership of Kiwix's "top articles" build (passed to `indexer build` as
   a second file), article length, and capped inbound-redirect count. Redirect titles get a fraction

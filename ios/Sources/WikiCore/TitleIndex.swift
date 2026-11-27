@@ -134,10 +134,10 @@ public final class TitleIndex {
         return 0
     }
 
-    /// First position in [0, count) whose text is not before `query`; `after` moves past matches too.
-    private func bound(_ count: Int, _ query: [UInt8], after: Bool, _ compare: (Int, [UInt8]) -> Int) -> Int {
-        var lo = 0
-        var hi = count
+    /// First position in [from, to) whose text is not before `query`; `after` moves past matches too.
+    private func bound(_ from: Int, _ to: Int, _ query: [UInt8], after: Bool, _ compare: (Int, [UInt8]) -> Int) -> Int {
+        var lo = from
+        var hi = to
         while lo < hi {
             let mid = (lo + hi) >> 1
             let c = compare(mid, query)
@@ -157,18 +157,19 @@ public final class TitleIndex {
     }
 
     private func titleRange(_ q: [UInt8]) -> Range<Int> {
-        bound(recordCount, q, after: false, compareTitle)..<bound(recordCount, q, after: true, compareTitle)
+        bound(0, recordCount, q, after: false, compareTitle)..<bound(0, recordCount, q, after: true, compareTitle)
     }
 
     private func innerRange(_ q: [UInt8]) -> Range<Int> {
-        bound(innerCount, q, after: false, compareInner)..<bound(innerCount, q, after: true, compareInner)
+        bound(0, innerCount, q, after: false, compareInner)..<bound(0, innerCount, q, after: true, compareInner)
     }
 
     /// Up to `limit` titles for `query`, best first:
     ///  1. titles that are exactly the query;
     ///  2. titles that start with it, most popular first;
     ///  3. titles with the query starting at a later word, most popular first;
-    ///  4. if that leaves the list short and there are several words, titles containing all of them.
+    ///  4. if that leaves the list short and there are several words, titles containing all of them;
+    ///  5. if the list is still short, a few titles one slip of the fingers away (see `nearMisses`).
     /// Each article appears once, under the first title that found it. `cancelled` is polled so a
     /// search made stale by the next keystroke can stop early.
     public func search(_ query: String, limit: Int, cancelled: () -> Bool = { false }) -> [Hit] {
@@ -204,6 +205,18 @@ public final class TitleIndex {
 
         let words = normalized.split(separator: " ").map(String.init).filter { !SearchText.stopWords.contains($0) }
         if words.count > 1 && hits.count < TitleIndex.few { allWords(words, add) }
+
+        if hits.count < min(TitleIndex.few, limit) && !cancelled() {
+            var more = TitleIndex.nearMost
+            for record in nearMisses(q, cancelled) {
+                let had = hits.count
+                if !add(record) { break }
+                if hits.count > had {
+                    more -= 1
+                    if more == 0 { break }
+                }
+            }
+        }
         return hits
     }
 
@@ -227,6 +240,76 @@ public final class TitleIndex {
         func consider(_ record: Int) -> Bool { !others.allSatisfy { hasWord(record, $0) } || add(record) }
         if !titleRanks.descending(bestTitles, budget: TitleIndex.visits, consider) { return }
         _ = innerRanks.descending(bestInners, budget: TitleIndex.visits) { consider(innerRecord($0)) }
+    }
+
+    /// Titles one slip away from the query `q`, for a search that found next to nothing: a letter
+    /// too many, one missing, two swapped or one wrong ("berln", "nvidai", "the beatls"). Each
+    /// corrected spelling is looked up as the start of a title, as the query itself is.
+    ///
+    /// Best first: the titles in which a corrected spelling ends where a word ends ("Berlin",
+    /// "Berlin Wall") come before those in which it stops inside a word ("Berlusconi", from
+    /// "berl"), and within each kind the most popular come first.
+    ///
+    /// The first letter is taken as right, and so is every byte of a letter that takes more than
+    /// one. A query shorter than `nearMin` bytes is left alone: one slip from a few letters is
+    /// half the alphabet. The Kotlin `nearMisses` is the same, step for step.
+    private func nearMisses(_ q: [UInt8], _ cancelled: () -> Bool) -> [Int] {
+        guard q.count >= TitleIndex.nearMin else { return [] }
+        var whole: [Int] = []
+        var part: [Int] = []
+        var tried = Set<[UInt8]>() // a doubled letter gives the same spelling twice
+        // Takes the titles in [from, to) that start with `spelling`; the range holds all of them.
+        func look(_ spelling: [UInt8], _ from: Int, _ to: Int) {
+            guard tried.insert(spelling).inserted else { return }
+            let first = bound(from, to, spelling, after: false, compareTitle)
+            guard first < to, compareTitle(first, spelling) == 0 else { return }
+            let end = bound(first, to, spelling, after: true, compareTitle)
+            // The titles that are the spelling and nothing more sort first, then those that go on
+            // with a space; `word` is where both have ended.
+            let word = bound(first, end, spelling + [TitleIndex.space], after: true, compareTitle)
+            _ = titleRanks.descending(first..<word, budget: TitleIndex.nearEach) { whole.append($0); return true }
+            _ = titleRanks.descending(word..<end, budget: TitleIndex.nearEach) { part.append($0); return true }
+        }
+        // [from, to) holds the titles that start with the query's first i bytes. A slip at byte i
+        // leaves those as they are, so every correction of it is in there; and once no title
+        // starts with them, no slip further along can lead to one.
+        var from = 0
+        var to = recordCount
+        func narrow(_ start: [UInt8]) {
+            from = bound(from, to, start, after: false, compareTitle)
+            to = bound(from, to, start, after: true, compareTitle)
+        }
+        narrow(Array(q[..<1]))
+        let space = TitleIndex.space
+        for i in 1..<q.count {
+            if from >= to || cancelled() { break }
+            let here = q[i]
+            if here < 0x80 { // one byte, one letter
+                let before = Array(q[..<i])
+                let after = Array(q[(i + 1)...])
+                look(before + after, from, to) // typed a letter too many
+                if i + 1 < q.count, q[i + 1] < 0x80, q[i + 1] != here { // typed two the wrong way round
+                    look(before + [q[i + 1], here] + q[(i + 2)...], from, to)
+                }
+                if here != space, q[i - 1] != space { look(before + [space, here] + after, from, to) } // left a space out
+                for letter in UInt8(ascii: "a")...UInt8(ascii: "z") {
+                    // Only letters that some title has at this point are worth trying.
+                    let next = before + [letter]
+                    let first = bound(from, to, next, after: false, compareTitle)
+                    let last = bound(first, to, next, after: true, compareTitle)
+                    if first == last { continue }
+                    if letter != here { look(next + after, first, last) } // typed a wrong letter
+                    look(next + [here] + after, first, last) // left a letter out
+                }
+            }
+            narrow(Array(q[...i]))
+        }
+        // Highest rank first, then index order, as the Kotlin sort does.
+        func best(_ a: Int, _ b: Int) -> Bool {
+            let ra = titleRanks.rank(a), rb = titleRanks.rank(b)
+            return ra != rb ? ra > rb : a < b
+        }
+        return whole.sorted(by: best) + part.sorted(by: best)
     }
 
     /// Whether some word of the record's title starts with `word`.
@@ -385,7 +468,10 @@ public final class TitleIndex {
     private static let maxExact = 64
     private static let leadExact = 3
     private static let visits = 600 // matches examined per step; many titles lead to the same article
-    private static let few = 8      // below this many results, also try the words in any order
+    private static let few = 8      // below this many results, also try the words in any order, then near misses
+    private static let nearMin = 5  // the shortest query, in bytes, that near misses are looked for
+    private static let nearEach = 16 // titles taken from each corrected spelling: its best-ranked
+    private static let nearMost = 8 // near misses added to a list at most
     private static let randomTries = 64
 
     /// The lowest rank the index builder gives an article with something to read. A page under

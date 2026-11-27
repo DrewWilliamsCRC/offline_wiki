@@ -34,7 +34,7 @@ differ() {
 }
 
 # Search, one query per line below. The indexer's last line is its timing, which wikicheck does
-# not print.
+# not print. The misspelled ones at the end find what they find through near misses.
 searches=0
 : > "$work/titles"
 while IFS= read -r query; do
@@ -76,6 +76,15 @@ charles ray
 the of
 new york
 united states
+rya charles
+ray charls
+ray charlesx
+charels
+georiga
+hit the raod jack
+the geniuss
+what'd i sya
+rayc
 QUERIES
 found="$(wc -l < "$work/titles" | tr -d ' ')"
 
