@@ -76,6 +76,8 @@ final class Downloads: NSObject, ObservableObject {
         let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // Application Support is backed up too; tens of gigabytes on their way must not be.
+        LibraryStore.keepOutOfBackups(folder)
         return folder
     }
 
@@ -281,6 +283,7 @@ final class Downloads: NSObject, ObservableObject {
                     try? FileManager.default.removeItem(at: target)
                     do {
                         try FileManager.default.moveItem(at: Downloads.arrived(file.name), to: target)
+                        LibraryStore.keepOutOfBackups(target) // a moved file may not keep its folder's mark
                     } catch {
                         fail("\(file.name) could not be put in place: \(error.localizedDescription)")
                     }
