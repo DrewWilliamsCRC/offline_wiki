@@ -10,14 +10,14 @@ val zstdVersion = providers.gradleProperty("zstdVersion").get()
 
 android {
     namespace = "dev.offlinewiki.reader"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.offlinewiki.reader"
         minSdk = 28
-        targetSdk = 34
-        versionCode = 9
-        versionName = "0.9"
+        targetSdk = 36
+        versionCode = 10
+        versionName = "1.0"
     }
 
     buildTypes {

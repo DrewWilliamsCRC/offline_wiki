@@ -11,21 +11,17 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
-import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 
 /**
- * Downloads a book from the [Catalog] into the shared Download folder, where [Library] looks for
+ * Downloads a book from the [Catalog] into the reader's [Folder], where [Library] looks for
  * Wikipedia. One book at a time, in [DownloadService], so that it carries on with the app out of
  * sight; this object holds what the screens show of it.
  *
@@ -56,54 +52,57 @@ object Downloads {
     @Volatile
     private var connection: HttpURLConnection? = null
 
-    val folder: File get() = File(Environment.getExternalStorageDirectory(), Environment.DIRECTORY_DOWNLOADS)
+    /** The reader's folder, where downloads go; null until one is chosen. The app sets it. */
+    @Volatile
+    var folder: Folder? = null
 
-    private fun target(file: Catalog.Remote) = File(folder, file.name)
-    private fun part(file: Catalog.Remote) = File(folder, file.name + ".part")
+    private fun sizeOf(name: String): Long = folder?.size(name) ?: 0
+    private fun partOf(file: Catalog.Remote) = file.name + ".part"
 
     /** The Wikipedia file of [book], as opposed to its index. */
     fun zimOf(book: Catalog.Book): Catalog.Remote = book.files.last { it.name.endsWith(".zim") }
 
     fun snapshotOf(book: Catalog.Book): Snapshot? = Snapshot.of(zimOf(book).name)
 
-    /** Wikipedia files of [book] here that are older snapshots than the catalog's, newest first. */
-    fun older(book: Catalog.Book): List<File> {
+    /** Names of the Wikipedia files of [book] here that are older snapshots than the catalog's, newest first. */
+    fun older(book: Catalog.Book): List<String> {
         val date = snapshotOf(book)?.date ?: return emptyList()
-        return (folder.listFiles() ?: emptyArray()).filter { f ->
-            val snapshot = Snapshot.of(f.name)
-            f.isFile && snapshot != null && snapshot.book == book.id && snapshot.date < date
-        }.sortedByDescending { it.name }
+        return (folder?.list() ?: emptyList()).map { it.name }.filter { name ->
+            val snapshot = Snapshot.of(name)
+            snapshot != null && snapshot.book == book.id && snapshot.date < date
+        }.sortedDescending()
     }
 
     /** A Wikipedia file with everything that goes with it: its index, and parts of either. */
-    private fun withCompanions(zim: File): List<File> =
-        listOf("", ".idx", ".part", ".idx.part").map { File(zim.path + it) }
+    private fun withCompanions(zim: String): List<String> = listOf("", ".idx", ".part", ".idx.part").map { zim + it }
 
     /** Every file [deleteOlder] or [delete] would remove for [book], whether there or not. */
-    fun filesOf(book: Catalog.Book, older: Boolean = true): List<File> =
-        (if (older) older(book) else emptyList()).flatMap(::withCompanions) + withCompanions(target(zimOf(book)))
+    fun filesOf(book: Catalog.Book): List<String> =
+        older(book).flatMap(::withCompanions) + withCompanions(zimOf(book).name)
 
     /** Deletes [book]'s older snapshots, to make room for the new one or once it is in place. */
-    fun deleteOlder(book: Catalog.Book) = older(book).flatMap(::withCompanions).forEach { it.delete() }
+    fun deleteOlder(book: Catalog.Book) = older(book).flatMap(::withCompanions).forEach { folder?.delete(it) }
 
     /** Deletes all of [book] that is here: every snapshot of it, and any part. */
-    fun delete(book: Catalog.Book) = filesOf(book).forEach { it.delete() }
+    fun delete(book: Catalog.Book) = filesOf(book).forEach { folder?.delete(it) }
 
     /** Bytes the older snapshots of [book] take up, index and all. */
-    fun olderSize(book: Catalog.Book): Long = older(book).flatMap(::withCompanions).sumOf { it.length() }
+    fun olderSize(book: Catalog.Book): Long = older(book).flatMap(::withCompanions).sumOf(::sizeOf)
+
+    private fun free(): Long = folder?.free() ?: 0
 
     /** Whether [book] can be downloaded beside what is here, leaving the margin free. */
-    fun roomFor(book: Catalog.Book): Boolean = folder.usableSpace >= book.size - have(book) + MARGIN
+    fun roomFor(book: Catalog.Book): Boolean = free() >= book.size - have(book) + MARGIN
 
     /** Whether [book] would fit if its older snapshots were deleted first. */
-    fun roomIfReplaced(book: Catalog.Book): Boolean = folder.usableSpace + olderSize(book) >= book.size - have(book) + MARGIN
+    fun roomIfReplaced(book: Catalog.Book): Boolean = free() + olderSize(book) >= book.size - have(book) + MARGIN
 
     /** Whether all of [book] is here: each file at its full size. One copied over USB counts too. */
-    fun complete(book: Catalog.Book): Boolean = book.files.all { target(it).length() == it.size }
+    fun complete(book: Catalog.Book): Boolean = book.files.all { sizeOf(it.name) == it.size }
 
     /** How many of [book]'s bytes are here, whole or in a part left by a stopped download. */
     fun have(book: Catalog.Book): Long = book.files.sumOf { file ->
-        if (target(file).length() == file.size) file.size else minOf(part(file).length(), file.size)
+        if (sizeOf(file.name) == file.size) file.size else minOf(sizeOf(partOf(file)), file.size)
     }
 
     /** Starts downloading [book] in the background, unless a download is already running. */
@@ -113,42 +112,55 @@ object Downloads {
         stopping = false
         status = Status(book, "Starting", have(book), book.size)
         val intent = Intent(context, DownloadService::class.java)
-        if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
+        try {
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
+        } catch (e: IllegalStateException) {
+            // Android refuses a background download it has given its daily time to already.
+            running = false
+            status = Status(book, "Stopped", have(book), book.size, "Android will not run the download now: ${e.message ?: e}. Try again later.")
+        }
     }
 
     /** Stops the download as soon as it can. What has arrived is kept, to carry on from. */
-    fun stop() {
+    fun stop(why: String? = null) {
         stopping = true
+        stoppedFor = why
         // A read waiting on the network ends now, not at its timeout. Off the main thread, which
         // must not touch the network.
         connection?.let { thread { it.disconnect() } }
     }
 
+    @Volatile
+    private var stoppedFor: String? = null
+
     /** The work itself, on the service's thread. */
     internal fun run(context: Context) {
         val book = status?.book ?: return
         try {
+            val folder = Folder.chosen(context) ?: throw IOException("Choose a folder for Wikipedia first.")
+            this.folder = folder
             ready(context, book)
             for (file in book.files) {
-                if (target(file).length() == file.size) continue
-                fetch(book, file)
+                if (folder.size(file.name) == file.size) continue
+                fetch(folder, book, file)
                 if (stopping) break
-                check(book, file)
+                check(folder, book, file)
                 if (stopping) break
                 // On the disk before it takes its name: a device that loses power just after
                 // must not be left with an empty file that looks finished.
-                FileOutputStream(part(file), true).use { it.fd.sync() }
-                if (!part(file).renameTo(target(file))) throw IOException("${file.name} could not be put in place")
+                folder.sync(partOf(file))
+                folder.rename(partOf(file), file.name)
             }
             if (!stopping) deleteOlder(book) // an update: the new snapshot is in place and checked
             status = when {
-                stopping -> Status(book, "Paused", have(book), book.size)
+                stopping -> Status(book, "Paused", have(book), book.size, stoppedFor)
                 else -> Status(book, "Done", book.size, book.size)
             }
         } catch (e: Exception) {
             status = Status(book, "Stopped", have(book), book.size, e.message ?: e.toString())
         } finally {
             connection = null
+            stoppedFor = null
             running = false
         }
     }
@@ -161,24 +173,29 @@ object Downloads {
         if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) {
             throw IOException("Connect to Wi-Fi first: Wikipedia is too big to download over mobile data.")
         }
-        folder.mkdirs()
         val needed = book.size - have(book) + MARGIN
-        val free = folder.usableSpace
+        val free = free()
         if (free < needed) {
             throw IOException("There is not enough room: this needs ${gb(needed)} more, and ${gb(free)} is free.")
         }
     }
 
     /** Brings [file]'s part up to its full size, carrying on from what is there. */
-    private fun fetch(book: Catalog.Book, file: Catalog.Remote) {
-        val part = part(file)
+    private fun fetch(folder: Folder, book: Catalog.Book, file: Catalog.Remote) {
+        val part = partOf(file)
         var failures = 0
         while (!stopping) {
-            val have = part.length()
+            // Always the size as it is now, never a listing kept from a moment ago: carrying on
+            // from the wrong place would put bytes where they do not belong.
+            folder.forget()
+            var have = folder.size(part)
+            if (have > file.size) {
+                folder.delete(part)
+                have = 0
+            }
             if (have == file.size) return
-            if (have > file.size) part.delete()
             try {
-                val from = part.length()
+                val from = have
                 val http = Http.open(file.url, from)
                 connection = http
                 try {
@@ -190,16 +207,15 @@ object Downloads {
                         else -> throw IOException("${file.name}: the server answered $code")
                     }
                     if (append && http.getHeaderField("Content-Range")?.startsWith("bytes $from-") != true) {
-                        part.delete() // not the part asked for: start again from the beginning
+                        folder.delete(part) // not the part asked for: start again from the beginning
                         continue
                     }
-                    if (!append && from > 0) part.delete() // the server sent it all again
-                    val base = have(book) - part.length()
-                    val before = part.length()
-                    FileOutputStream(part, append).use { out ->
+                    val start = if (append) from else 0 // a 200 is everything again, from the start
+                    val base = have(book) - have
+                    var written = start
+                    folder.output(part, fresh = !append).use { out ->
                         http.inputStream.use { input ->
                             val buffer = ByteArray(BUFFER)
-                            var written = part.length()
                             var shown = 0L
                             while (!stopping) {
                                 val n = input.read(buffer)
@@ -214,7 +230,7 @@ object Downloads {
                         }
                     }
                     // An answer that brought nothing counts as a failure, so it is not asked again at once.
-                    if (part.length() == before && !stopping) throw IOException("${file.name}: the server sent nothing")
+                    if (written == start && !stopping) throw IOException("${file.name}: the server sent nothing")
                     failures = 0
                 } finally {
                     http.disconnect()
@@ -234,10 +250,10 @@ object Downloads {
     }
 
     /** Reads the finished part back and compares its SHA-256 with the catalog's. */
-    private fun check(book: Catalog.Book, file: Catalog.Remote) {
-        val part = part(file)
+    private fun check(folder: Folder, book: Catalog.Book, file: Catalog.Remote) {
+        val part = partOf(file)
         val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(part).use { input ->
+        folder.input(part).use { input ->
             val buffer = ByteArray(BUFFER)
             var read = 0L
             var shown = 0L
@@ -255,7 +271,7 @@ object Downloads {
         if (stopping) return
         val sum = digest.digest().joinToString("") { "%02x".format(it) }
         if (sum != file.sha256) {
-            part.delete()
+            folder.delete(part)
             throw IOException("${file.name} arrived damaged and was deleted. Try again.")
         }
     }
@@ -291,6 +307,15 @@ class DownloadService : Service() {
         )
     }
 
+    /**
+     * Android 15 and later give a download like this six hours a day in the background, then call
+     * this; the service must stop within seconds. What has arrived is kept, and Carry on picks it
+     * up, which Android allows again once the app has been on screen.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Downloads.stop("Android pauses a download after six hours in the background. Tap Carry on to go on.")
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(ONGOING, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -322,7 +347,8 @@ class DownloadService : Service() {
     private fun finish() {
         main.removeCallbacksAndMessages(null)
         stopForeground(STOP_FOREGROUND_REMOVE)
-        Downloads.status?.takeIf { it.doing != "Paused" }?.let { notifications.notify(ENDED, notification()) }
+        // Said when it ends, and when Android paused it; not when the reader did.
+        Downloads.status?.takeIf { it.doing != "Paused" || it.problem != null }?.let { notifications.notify(ENDED, notification()) }
         stopSelf()
     }
 

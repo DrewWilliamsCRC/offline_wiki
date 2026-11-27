@@ -4,19 +4,18 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Color
-import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
+import android.os.Build
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
+import android.window.OnBackInvokedDispatcher
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import wikireader.core.TitleIndex
 
 /**
  * The app's only window: a search screen and a reader screen, one shown at a time, and the
@@ -35,6 +34,22 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         root = FrameLayout(this).apply { setBackgroundColor(Color.WHITE) }
         setContentView(root)
+        if (Build.VERSION.SDK_INT >= 30) {
+            // Android 15 and later draw every app edge to edge, under the status and navigation
+            // bars; earlier ones do so when asked. Either way the screens keep clear of the bars
+            // and of the keyboard, which no longer shrinks the window, through this padding.
+            window.setDecorFitsSystemWindows(false)
+            root.setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                val keyboard = insets.getInsets(WindowInsets.Type.ime())
+                view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard.bottom))
+                WindowInsets.CONSUMED
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            // Android 16 no longer calls onBackPressed for an app that targets it.
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { goBack() }
+        }
     }
 
     override fun onStart() {
@@ -85,15 +100,18 @@ class MainActivity : Activity() {
 
     private fun start() {
         leave()
-        if (!Environment.isExternalStorageManager()) {
+        val folder = Folder.chosen(this)
+        if (folder == null) {
             message(
-                "Wiki Reader needs permission to read the Wikipedia file in your Download folder.\n\n" +
-                    "Tap the button, switch on \"Allow access to manage all files\", then come back.",
-                "Allow file access",
-                ::askForFileAccess,
+                "Wiki Reader keeps Wikipedia in a folder you choose.\n\n" +
+                    "Tap the button, make a new folder named Wikipedia (or open one that has Wikipedia in it already), " +
+                    "and tap \"Use this folder\". Android then asks to allow access to it: allow it.",
+                "Choose a folder",
+                ::chooseFolder,
             )
             return
         }
+        Downloads.folder = folder
         val library = try {
             Library.open(this)
         } catch (e: Exception) {
@@ -102,9 +120,10 @@ class MainActivity : Activity() {
         }
         if (library == null) {
             message(
-                "No Wikipedia file found.\n\nDownload one over Wi-Fi, or copy a .zim file and its .idx index into the Download folder.",
+                "No Wikipedia file found in the folder \"${folder.name}\".\n\nDownload one over Wi-Fi, or copy a .zim file and its .idx index into that folder.",
                 "Download Wikipedia" to ::showDownloads,
                 "Look again" to ::start,
+                "Choose another folder" to ::chooseFolder,
             )
             return
         }
@@ -145,12 +164,26 @@ class MainActivity : Activity() {
         history = null
     }
 
-    private fun askForFileAccess() {
+    private fun chooseFolder() {
         try {
-            startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+            startActivityForResult(Folder.picker(), PICK_FOLDER)
         } catch (e: ActivityNotFoundException) {
-            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            message("This device has no folder picker, which Wiki Reader needs.\n\n${e.message ?: e}", "Try again", ::start)
         }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (requestCode != PICK_FOLDER || resultCode != RESULT_OK || uri == null) return
+        try {
+            Folder.choose(this, uri)
+        } catch (e: SecurityException) {
+            message("Wiki Reader could not keep access to that folder.\n\n${e.message ?: e}", "Choose a folder", ::chooseFolder)
+            return
+        }
+        start()
     }
 
     /** Over whatever is showing; Back returns to it. Opening a download starts afresh. */
@@ -160,7 +193,7 @@ class MainActivity : Activity() {
         val screen = DownloadScreen(
             this,
             openWhenDone = { search == null },
-            reading = { library?.file?.name },
+            reading = { library?.name },
             letGo = ::letGo,
             onClose = ::closeDownloads,
             onReady = ::start,
@@ -175,8 +208,8 @@ class MainActivity : Activity() {
      * that is still open keeps its space, and the index stays mapped until it is collected.
      */
     private fun letGo(names: Set<String>) {
-        val open = library?.file ?: return
-        if (open.name !in names && TitleIndex.fileFor(open).name !in names) return
+        val open = library?.name ?: return
+        if (open !in names && "$open.idx" !in names) return
         search?.let { root.removeView(it.view); it.close() }
         reader?.let { root.removeView(it.view); it.close() }
         release()
@@ -263,5 +296,6 @@ class MainActivity : Activity() {
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        const val PICK_FOLDER = 1
     }
 }

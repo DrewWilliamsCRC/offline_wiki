@@ -19,8 +19,13 @@ import java.nio.file.StandardOpenOption
  *
  * Safe to use from several threads: every read is positional.
  */
-class ZimFile(file: File) : Closeable {
-    private val channel: FileChannel = FileChannel.open(file.toPath(), StandardOpenOption.READ)
+class ZimFile(private val channel: FileChannel, private val name: String) : Closeable {
+    /**
+     * [channel] is open for reading, and becomes this reader's to close; [name] is for messages.
+     * Android opens a file the reader picked through the system's folder picker this way, from a
+     * file descriptor, as it has no path it may open.
+     */
+    constructor(file: File) : this(FileChannel.open(file.toPath(), StandardOpenOption.READ), file.path)
 
     val uuid: ByteArray
     val entryCount: Int
@@ -50,7 +55,7 @@ class ZimFile(file: File) : Closeable {
 
     init {
         val h = read(0, HEADER_SIZE)
-        require(h.getInt(0) == MAGIC) { "not a ZIM file: $file" }
+        require(h.getInt(0) == MAGIC) { "not a ZIM file: $name" }
         uuid = ByteArray(16).also { h.position(8); h.get(it) }
         entryCount = h.getInt(24)
         clusterCount = h.getInt(28)

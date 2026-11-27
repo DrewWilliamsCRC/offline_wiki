@@ -26,8 +26,9 @@ import java.util.PriorityQueue
  *   title ranks one byte per record, then the maximum of every 256, then of every 65536
  *   inner ranks the same for the inner list (each entry carries its record's rank)
  */
-class TitleIndex(file: File) : Closeable {
-    private val channel = FileChannel.open(file.toPath(), StandardOpenOption.READ)
+class TitleIndex(private val channel: FileChannel, private val name: String) : Closeable {
+    /** [channel] is open for reading, and becomes this index's to close; [name] is for messages. */
+    constructor(file: File) : this(FileChannel.open(file.toPath(), StandardOpenOption.READ), file.name)
     val zimUuid: ByteArray
     val recordCount: Int
     val innerCount: Int
@@ -44,12 +45,12 @@ class TitleIndex(file: File) : Closeable {
         try {
             val h = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
             while (h.hasRemaining()) if (channel.read(h, h.position().toLong()) < 0) break
-            require(!h.hasRemaining() && h.getInt(0) == MAGIC) { "${file.name} is not a title index" }
+            require(!h.hasRemaining() && h.getInt(0) == MAGIC) { "$name is not a title index" }
             val version = h.getInt(4)
             require(version == VERSION) {
                 // Which side is behind decides what to do about it.
-                if (version > VERSION) "${file.name} is a newer kind of index (version $version) than this reader knows (version $VERSION); install the newer reader"
-                else "${file.name} is an older kind of index (version $version) than this reader needs (version $VERSION); build it again"
+                if (version > VERSION) "$name is a newer kind of index (version $version) than this reader knows (version $VERSION); install the newer reader"
+                else "$name is an older kind of index (version $version) than this reader needs (version $VERSION); build it again"
             }
             zimUuid = ByteArray(16).also { h.position(8); h.get(it) }
             recordCount = h.getInt(24)
@@ -57,10 +58,10 @@ class TitleIndex(file: File) : Closeable {
             // A copy that stopped part-way has the header of a whole index and less than all of it.
             val size = channel.size()
             fun section(pos: Long, length: Long): ByteBuffer {
-                require(pos >= 0 && length >= 0 && pos <= size - length) { "${file.name} is cut short; copy it again" }
+                require(pos >= 0 && length >= 0 && pos <= size - length) { "$name is cut short; copy it again" }
                 return channel.map(FileChannel.MapMode.READ_ONLY, pos, length).order(ByteOrder.LITTLE_ENDIAN)
             }
-            require(recordCount >= 0 && innerCount >= 0) { "${file.name} is too large for this reader" }
+            require(recordCount >= 0 && innerCount >= 0) { "$name is too large for this reader" }
             offsets = section(h.getLong(32), 4L * (recordCount + 1))
             blob = section(h.getLong(40), h.getLong(48))
             inner = section(h.getLong(56), INNER_SIZE.toLong() * innerCount)

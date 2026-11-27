@@ -167,7 +167,7 @@ class DownloadScreen(
     private fun look(book: Catalog.Book, status: Downloads.Status?): Look {
         val mine = status?.book?.id == book.id
         val snapshot = Downloads.snapshotOf(book)?.month ?: "the catalog's"
-        val older = Downloads.older(book).firstOrNull()?.let { Snapshot.of(it.name)?.month }
+        val older = Downloads.older(book).firstOrNull()?.let { Snapshot.of(it)?.month }
         val have = Downloads.have(book)
         val amount = "${Downloads.gb(have)} of ${Downloads.gb(book.size)}"
         return when {
@@ -185,7 +185,8 @@ class DownloadScreen(
                 if (fresh) Look("Downloaded. It is ready to read.", "Open")
                 else Look("On this device: $snapshot.", if (Downloads.running) null else "Delete")
             }
-            mine && status!!.problem != null -> Look(status.problem, "Try again", if (older != null) "Delete" else null)
+            mine && status!!.problem != null ->
+                Look(status.problem, if (status.doing == "Paused") "Carry on" else "Try again", if (older != null || have > 0) "Delete" else null)
             Downloads.running -> Look(if (have > 0) "Paused: $amount is here." else if (older != null) "On this device: $older." else "Not on this device.")
             have > 0 -> Look("Paused: $amount is here.", "Carry on", "Delete")
             older != null -> Look(
@@ -206,14 +207,13 @@ class DownloadScreen(
             "Open" -> onReady()
             "Keep" -> Unit
             "Delete" -> if (asked == "Delete ${book.id}") {
-                val files = Downloads.filesOf(book)
-                letGo(files.map { it.name }.toSet())
+                letGo(Downloads.filesOf(book).toSet())
                 Downloads.delete(book)
             } else {
                 confirming = "Delete ${book.id}"
             }
             "Replace" -> if (asked == "Replace ${book.id}") {
-                letGo(Downloads.older(book).map { it.name }.toSet())
+                letGo(Downloads.older(book).flatMap { listOf(it, "$it.idx") }.toSet())
                 Downloads.deleteOlder(book)
                 start(book)
             } else {

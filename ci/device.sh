@@ -26,7 +26,7 @@ book=wikipedia_en_test
 zims="$work/data/zim"
 device="$work/device"
 kiwix="$work/kiwix"
-mkdir -p "$zims" "$work/data/app" "$device/Download" "$device/Books" "$kiwix" "$work/bin" "$work/Downloads"
+mkdir -p "$zims" "$work/data/app" "$device/Download" "$device/Wikipedia" "$device/Books" "$kiwix" "$work/bin" "$work/Downloads"
 for tool in mtp-detect mtp-folders mtp-files mtp-delfile mtp-sendfile mtp-getfile; do
   ln -s "$root/ci/fake-mtp.sh" "$work/bin/$tool"
 done
@@ -83,7 +83,7 @@ done
 
 # A scenario can name another book, device folder or books to publish for one run: use_book=... run ...
 wiki() {
-  WIKI_DATA="$work/data" WIKI_BOOK="${use_book:-$book}" WIKI_DEVICE_FOLDER="${use_folder:-Download}" \
+  WIKI_DATA="$work/data" WIKI_BOOK="${use_book:-$book}" WIKI_DEVICE_FOLDER="${use_folder:-Wikipedia}" \
     WIKI_ZIM_URL="http://127.0.0.1:$port" WIKI_MTP_PAUSE=0 WIKI_DOWNLOADS="$work/Downloads" \
     WIKI_PUBLISH="${use_publish:-${book}_nopic ${book}_mini wikipedia_en_none_nopic}" WIKI_PUBLISH_REPO=someone/offline_wiki \
     FAKE_MTP_DIR="$device" PATH="$work/bin:$PATH" "$root/wiki.sh" "$@"
@@ -144,13 +144,14 @@ touch -t 202601010000 "$zims/$old"           # older than its index, as a downlo
 head -c 5000 /dev/urandom > "$zims/$old.idx" # push never looks inside an index
 echo "first build" > "$work/data/app/$app1"
 : > "$device/.log"
-down="$device/Download"
+down="$device/Download"   # where the app goes, to be tapped
+shelf="$device/Wikipedia" # where Wikipedia and its index go: the folder Wiki Reader was given
 
 scenario "push to an e-reader that has nothing"
 run 0 push
-check "the app, the index and Wikipedia are in Download" \
-  eval 'same "$work/data/app/$app1" "$down/$app1" && same "$zims/$old.idx" "$down/$old.idx" && same "$zims/$old" "$down/$old"'
-check "nothing was put anywhere else" eval '[ -z "$(ls "$device/Books")" ]'
+check "the app is in Download, the index and Wikipedia in the app's folder" \
+  eval 'same "$work/data/app/$app1" "$down/$app1" && same "$zims/$old.idx" "$shelf/$old.idx" && same "$zims/$old" "$shelf/$old"'
+check "nothing was put anywhere else" eval '[ -z "$(ls "$device/Books")" ] && [ "$(ls "$down")" = "$app1" ]'
 
 scenario "push again"
 sent="$(log_lines)"
@@ -161,19 +162,19 @@ check "it says each file is already there" eval '[ "$(grep -c "is on the e-reade
 scenario "an index rebuilt to the same size"
 head -c 5000 /dev/urandom > "$zims/$old.idx"
 run 0 push
-check "the new index replaced the old one" same "$zims/$old.idx" "$down/$old.idx"
+check "the new index replaced the old one" same "$zims/$old.idx" "$shelf/$old.idx"
 check "Wikipedia itself was not sent again" eval '[ "$(grep -cxF "send $old" "$device/.log")" = 1 ]'
 
 scenario "a copy that was interrupted earlier"
-head -c 1000 "$zims/$old" > "$down/$old"
+head -c 1000 "$zims/$old" > "$shelf/$old"
 run 0 push
-check "the partial file was replaced by the whole one" same "$zims/$old" "$down/$old"
+check "the partial file was replaced by the whole one" same "$zims/$old" "$shelf/$old"
 
 scenario "a transfer that stops half-way"
-rm -f "$down/$old"
+rm -f "$shelf/$old"
 echo 1 > "$device/.cut"
 run 0 push
-check "it was sent again and arrived whole" same "$zims/$old" "$down/$old"
+check "it was sent again and arrived whole" same "$zims/$old" "$shelf/$old"
 
 scenario "a newer build of the app"
 rm -f "$work/data/app/$app1"
@@ -186,30 +187,44 @@ scenario "an e-reader with thousands of other files"
 # Enough listing after the files wiki.sh looks for that stopping at the first match breaks the pipe.
 mkdir -p "$device/Notes"
 for i in $(seq 1000 2499); do : > "$device/Notes/note-$i.txt"; : > "$down/zz-other-$i.txt"; done
-rm -f "$down/$old.idx"
+rm -f "$shelf/$old.idx"
 run 0 push
-check "the missing index was sent" same "$zims/$old.idx" "$down/$old.idx"
+check "the missing index was sent" same "$zims/$old.idx" "$shelf/$old.idx"
 rm -rf "$device/Notes"
 find "$down" -name 'zz-other-*' -delete
 
 scenario "sessions that fail the way back-to-back ones do"
-rm -f "$down/$old.idx"
+rm -f "$shelf/$old.idx"
 echo 4 > "$device/.flaky"
 run 0 push
-check "the index still arrived" same "$zims/$old.idx" "$down/$old.idx"
+check "the index still arrived" same "$zims/$old.idx" "$shelf/$old.idx"
 
 scenario "too little room on the e-reader"
-rm -f "$down/$old"
+rm -f "$shelf/$old"
 echo 1000 > "$device/.free"
 run fail push
 check "it says how much room there is and what could be holding it" eval 'says "free;" && says "home button"'
-check "nothing was sent" gone "$down/$old"
+check "nothing was sent" gone "$shelf/$old"
 rm -f "$device/.free"
 run 0 push
 
 scenario "an e-reader without the folder"
 use_folder=Nowhere run fail push
 check "it names the missing folder" says 'no "Nowhere" folder'
+check "and says how to make it" says "Open Wiki Reader on it and choose a folder"
+
+scenario "a Wikipedia left in Download by an earlier push"
+# Before 1.0 the app read Wikipedia from Download, so that is where an e-reader already has it.
+mv "$shelf/$old" "$down/$old"
+mv "$shelf/$old.idx" "$down/$old.idx"
+sent="$(log_lines)"
+run fail push
+check "it asks for it to be moved on the e-reader, rather than sending it again" \
+  eval 'says "Move it and its .idx into the Wikipedia folder" && [ "$(log_lines)" = "$sent" ]'
+mv "$down/$old" "$shelf/$old"
+mv "$down/$old.idx" "$shelf/$old.idx"
+run 0 push
+check "once it is moved, nothing needs sending" eval '[ "$(log_lines)" = "$sent" ]'
 
 scenario "an e-reader that is charging but not sharing files"
 : > "$device/.unplugged"
@@ -244,11 +259,11 @@ check "the copy matches" says "checksum OK"
 echo 1 > "$device/.cut"
 run 0 verify device
 check "a read that was cut short is tried again" says "trying again"
-size="$(stat -f %z "$down/$old")"
-head -c "$size" /dev/urandom > "$down/$old"
+size="$(stat -f %z "$shelf/$old")"
+head -c "$size" /dev/urandom > "$shelf/$old"
 run fail verify device
 check "a damaged copy is reported" says "does not match"
-cp "$zims/$old" "$down/$old"
+cp "$zims/$old" "$shelf/$old"
 
 scenario "update when nothing newer is published"
 sent="$(log_lines)"
@@ -274,8 +289,8 @@ rm -f "$device/.unplugged"
 touch "$zims/$old" "$zims/$old.idx"
 run 0 update
 check "the e-reader has the new snapshot and its index" \
-  eval 'same "$zims/$new" "$down/$new" && same "$zims/$new.idx" "$down/$new.idx"'
-check "the old snapshot and its index are gone from the e-reader" eval 'gone "$down/$old" && gone "$down/$old.idx"'
+  eval 'same "$zims/$new" "$shelf/$new" && same "$zims/$new.idx" "$shelf/$new.idx"'
+check "the old snapshot and its index are gone from the e-reader" eval 'gone "$shelf/$old" && gone "$shelf/$old.idx"'
 check "the old one was removed before the new one was sent" before_in_log "delete $old" "send $new"
 check "the app is still there" same "$work/data/app/$app2" "$down/$app2"
 check "the old snapshot is gone from the Mac" eval 'gone "$zims/$old" && gone "$zims/$old.idx" && gone "$zims/$old.sha256"'
