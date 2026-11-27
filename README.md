@@ -234,8 +234,13 @@ repository.
 [ios/](ios/) holds the same reader as an app for iOS 16 and later. Its file reader and search are a
 Swift port of the Android app's; on the full Wikipedia file the two return byte-identical articles
 and the same search results in the same order. The app has a search screen (results as you type,
-recently read, a random article) and an article view with back/forward, a menu of the article's
-sections, text size and a dark appearance. Like the Android app, it opens where you left it.
+recently read, a random article, and the month the copy of Wikipedia dates from) and an article
+view with back/forward, a menu of the article's sections, text size and a dark appearance. Its
+text starts at the size set for the whole device (Settings, Display & Brightness, Text Size), and
+A− / A+ adjust it from there. A menu at the top finds a word in the article, shares it, or opens
+it on wikipedia.org. Like the Android app, it opens where you left it. Wikipedia and its index are
+kept out of iCloud and computer backups: they would use tens of gigabytes there, and can be
+downloaded again.
 
 It passes its tests in the iPhone and iPad simulators against the full Wikipedia file, and runs on
 an iPhone with that file on board. `./wiki.sh` does not build or install it; the steps are by hand

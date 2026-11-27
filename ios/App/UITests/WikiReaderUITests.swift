@@ -216,6 +216,74 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 10), "Done did not return to the search screen")
     }
 
+    /// The article's menu finds a word far down it with the system's find bar, offers to share it,
+    /// and opens it at its own address on wikipedia.org in Safari. (Safari shows the address it was
+    /// given whether or not it can load it.)
+    func testFindShareAndOpenOnWikipedia() throws {
+        let heading = openArticle(typing: "photosyn", choosing: "Photosynthesis")
+        XCTAssertTrue(heading.isHittable, "the article's heading is not on screen at first")
+
+        app.buttons["More"].tap()
+        XCTAssertTrue(app.buttons["Find in Article"].waitForExistence(timeout: 10), "the menu has no Find")
+        XCTAssertTrue(app.buttons["Share"].exists, "the menu has no Share")
+        XCTAssertTrue(app.buttons["Open on Wikipedia"].exists, "the menu has no Open on Wikipedia")
+        shot("17-article-menu")
+        app.buttons["Find in Article"].tap()
+        sleep(1)
+        app.typeText("Ingenhousz") // in the article's history, far below its top
+        expectation(for: NSPredicate(format: "isHittable == false"), evaluatedWith: heading)
+        waitForExpectations(timeout: 10)
+        shot("18-found")
+        app.typeText("\n")
+
+        app.buttons["More"].tap()
+        app.buttons["Open on Wikipedia"].tap()
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 20), "Safari did not open")
+        let address = safari.descendants(matching: .any)
+            .matching(NSPredicate(format: "value CONTAINS 'en.wikipedia.org' OR label CONTAINS 'en.wikipedia.org'")).firstMatch
+        XCTAssertTrue(address.waitForExistence(timeout: 20), "Safari was not given the article's address on en.wikipedia.org")
+        app.activate()
+    }
+
+    /// Articles start at the system's text size, as the rest of the app does.
+    func testArticlesFollowTheSystemTextSize() throws {
+        let standard = openArticle(typing: "photosyn", choosing: "Photosynthesis").frame.height
+        app.terminate()
+        app.launchArguments = ["-reading", "NO", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launch()
+        let larger = openArticle(typing: "photosyn", choosing: "Photosynthesis").frame.height
+        shot("19-larger-system-text")
+        // The largest standard size makes body text about a third bigger.
+        XCTAssertGreaterThan(larger, standard * 1.2, "the article's text did not grow with the system's")
+    }
+
+    /// The search screen says when this copy of Wikipedia was made, and only while its field is empty.
+    func testSaysHowOldTheCopyIs() throws {
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        let age = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Wikipedia as of '")).firstMatch
+        XCTAssertTrue(age.waitForExistence(timeout: 10), "the search screen does not say how old the copy is")
+        field.tap()
+        field.typeText("paris")
+        XCTAssertTrue(app.staticTexts["Paris"].waitForExistence(timeout: 10))
+        XCTAssertFalse(age.exists, "the age shows over search results")
+    }
+
+    /// Searches for `query`, opens the result titled `title`, and returns the article's heading.
+    private func openArticle(typing query: String, choosing title: String) -> XCUIElement {
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap()
+        field.typeText(query)
+        let result = app.staticTexts[title]
+        XCTAssertTrue(result.waitForExistence(timeout: 10), "no \(title) result")
+        result.tap()
+        let heading = app.webViews.firstMatch.staticTexts[title].firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 20), "the article did not load")
+        return heading
+    }
+
     func testDarkAppearance() throws {
         // The appearance is read when the app starts, so set it and start again.
         app.terminate()
