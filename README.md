@@ -260,7 +260,7 @@ an iPhone with that file on board. `./wiki.sh` does not build or install it; the
 and need Xcode and XcodeGen.
 
 **Through TestFlight.** The repository's owner uploads builds with
-[ios/scripts/testflight-upload.sh](ios/scripts/testflight-upload.sh), for internal testing only:
+[ios/scripts/testflight-upload.sh](ios/scripts/testflight-upload.sh) for internal testing:
 the testers are people on the owner's App Store Connect team, who get an email invitation. Install
 **TestFlight** from the App Store, open the invitation and tap **Install**, and turn on Automatic
 Updates for Wiki Reader there. Then open Wiki Reader and download Wikipedia in the app (see

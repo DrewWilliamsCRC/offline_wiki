@@ -302,7 +302,7 @@ Installing over the app keeps its Documents folder, so the 53 GB file is not cop
 a device; otherwise the installed build cannot be told from the one before it. Installing changes
 the user's own phone, so ask first.
 
-**TestFlight.** The app also ships through TestFlight, internal testing only: testers are App Store
+**TestFlight.** The app also ships through TestFlight, to internal testers only: testers are App Store
 Connect users on the owner's team (at most 100), and no Beta App Review is involved. Its App Store
 Connect record is for bundle ID `dev.offlinewiki.reader`, which can never be changed. The setup
 copies the one the owner's Lighthouse Mobile app uses, on the same team.
@@ -327,7 +327,8 @@ copies the one the owner's Lighthouse Mobile app uses, on the same team.
 - **The App Store listing** (texts, age rating answers, review notes, and how its screenshots are
   taken) is `ios/AppStore.md`, with the screenshots in `ios/AppStore/screenshots/`. A build can be
   chosen for an App Store version only if its `MARKETING_VERSION` equals that version's number
-  (1.0 for the first). App Store Connect shows the app's icon only once a build is chosen for
+  (1.0 for the first), and only if it was not uploaded as internal only: the export options leave
+  out `testFlightInternalTestingOnly`, which builds 4 to 7 had. App Store Connect shows the app's icon only once a build is chosen for
   the version; until then the Apps page shows a placeholder.
 - **The privacy manifest** is `ios/App/PrivacyInfo.xcprivacy`. App Store Connect wants a reason for
   each "required reason" API: it declares `UserDefaults` (`CA92.1`), file timestamps (`C617.1`

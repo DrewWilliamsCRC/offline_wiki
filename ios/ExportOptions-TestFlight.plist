@@ -3,8 +3,10 @@
 <plist version="1.0">
 <dict>
 	<!-- xcodebuild -exportArchive options for a TestFlight upload (see "TestFlight" in CLAUDE.md).
-	     Internal testing only: such a build can't go to external testers or the App Store. Xcode
-	     raises the build number past the last one uploaded (manageAppVersionAndBuildNumber).
+	     Each upload goes to the internal testers and can also be chosen for an App Store version.
+	     (testFlightInternalTestingOnly would mark it internal only, and App Store Connect will not
+	     add such a build to a version for review.) Xcode raises the build number past the last one
+	     uploaded (manageAppVersionAndBuildNumber).
 	     There is no teamID: the export uses the team the archive was signed for, and this
 	     repository is public. -->
 	<key>method</key>
@@ -13,8 +15,6 @@
 	<string>upload</string>
 	<key>signingStyle</key>
 	<string>automatic</string>
-	<key>testFlightInternalTestingOnly</key>
-	<true/>
 	<key>manageAppVersionAndBuildNumber</key>
 	<true/>
 	<key>uploadSymbols</key>
