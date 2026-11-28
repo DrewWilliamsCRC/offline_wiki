@@ -330,6 +330,10 @@ copies the one the owner's Lighthouse Mobile app uses, on the same team.
   (1.0 for the first), and only if it was not uploaded as internal only: the export options leave
   out `testFlightInternalTestingOnly`, which builds 4 to 7 had. App Store Connect shows the app's
   icon only once a build is chosen for the version; until then the Apps page shows a placeholder.
+- **The icon** is a row of encyclopedia volumes, drawn by `ios/scripts/draw-icon.swift` into
+  `ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png`. It replaced a serif W before the first
+  review, as that looked too much like the Wikipedia app's own icon (App Review guidelines 4.1 and
+  5.2.1). Keep it clear of Wikipedia's W and globe, and of Apple Books' open book.
 - **The privacy manifest** is `ios/App/PrivacyInfo.xcprivacy`. App Store Connect wants a reason for
   each "required reason" API: it declares `UserDefaults` (`CA92.1`), file timestamps (`C617.1`
   for the Documents folder, `3B52.1` for a folder the reader picked), which `LibraryStore.stamp`
