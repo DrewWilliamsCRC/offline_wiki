@@ -328,8 +328,8 @@ copies the one the owner's Lighthouse Mobile app uses, on the same team.
   taken) is `ios/AppStore.md`, with the screenshots in `ios/AppStore/screenshots/`. A build can be
   chosen for an App Store version only if its `MARKETING_VERSION` equals that version's number
   (1.0 for the first), and only if it was not uploaded as internal only: the export options leave
-  out `testFlightInternalTestingOnly`, which builds 4 to 7 had. App Store Connect shows the app's icon only once a build is chosen for
-  the version; until then the Apps page shows a placeholder.
+  out `testFlightInternalTestingOnly`, which builds 4 to 7 had. App Store Connect shows the app's
+  icon only once a build is chosen for the version; until then the Apps page shows a placeholder.
 - **The privacy manifest** is `ios/App/PrivacyInfo.xcprivacy`. App Store Connect wants a reason for
   each "required reason" API: it declares `UserDefaults` (`CA92.1`), file timestamps (`C617.1`
   for the Documents folder, `3B52.1` for a folder the reader picked), which `LibraryStore.stamp`
