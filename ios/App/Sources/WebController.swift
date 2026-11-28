@@ -276,13 +276,9 @@ final class ArticleServer: NSObject {
     /// followed, once. Footnote marks ([1]) and inline styles are left out; superscripts such as
     /// the 2 of km² stay.
     func summary(of path: String, forwarded: Bool = false) -> String? {
+        if !forwarded, let target = forwardTarget(of: path) { return summary(of: target, forwarded: true) }
         guard let item = try? library.item(path), item.mimeType.hasPrefix("text/html") else { return nil }
         let html = String(decoding: item.data.prefix(512 * 1024), as: UTF8.self)
-        // content="0;URL='./A_Song_for_You#Herbie_Hancock_featuring_Christina_Aguilera'"
-        if !forwarded, item.data.count < 2048,
-           let match = html.firstMatch(of: /http-equiv="refresh"[^>]*?content="[^"]*?[Uu][Rr][Ll]='?(?:\.\/)?([^"'#]+)/) {
-            return summary(of: String(match.1).removingPercentEncoding ?? String(match.1), forwarded: true)
-        }
         for match in html.matches(of: /<p\b[^>]*>(.*?)<\/p>/.dotMatchesNewlines()) {
             let marked = String(match.1)
                 .replacing(/<style\b.*?<\/style>|<sup\b[^>]*class="[^"]*reference[^"]*"[^>]*>.*?<\/sup>/.dotMatchesNewlines(), with: "")
@@ -296,6 +292,16 @@ final class ArticleServer: NSObject {
             return text.count > 600 ? String(text.prefix(600)) + "…" : text
         }
         return nil
+    }
+
+    /// Where one of the tiny pages that only forward to a section of another article leads: that
+    /// article's path, without the section. Nil for any other page.
+    func forwardTarget(of path: String) -> String? {
+        guard let item = try? library.item(path), item.data.count < 2048 else { return nil }
+        // content="0;URL='./A_Song_for_You#Herbie_Hancock_featuring_Christina_Aguilera'"
+        let html = String(decoding: item.data, as: UTF8.self)
+        guard let match = html.firstMatch(of: /http-equiv="refresh"[^>]*?content="[^"]*?[Uu][Rr][Ll]='?(?:\.\/)?([^"'#]+)/) else { return nil }
+        return String(match.1).removingPercentEncoding ?? String(match.1)
     }
 
     /// Decodes the character references HTML text may hold: numeric ones, and the few named ones
@@ -501,7 +507,12 @@ extension WebController: WKUIDelegate {
         // Read off the main thread: a 1 MB article takes a moment to decompress.
         let (library, server) = (self.library, self.server)
         server.queue.async {
-            let article = library.article(at: path)
+            var article = library.article(at: path)
+            // A page that only forwards to a section of another article stands for that article,
+            // so that Save and Share give the article, as the article menu does.
+            if let target = article.flatMap({ server.forwardTarget(of: $0.path) }), let real = library.article(at: target) {
+                article = real
+            }
             let summary = article.flatMap { server.summary(of: $0.path) }
             Task { @MainActor [weak self] in
                 completionHandler(self?.linkMenu(url, path: path, article: article, summary: summary))

@@ -437,6 +437,14 @@ final class WikiReaderUITests: XCTestCase {
     /// can be done with it; Open goes there.
     func testLongPressOnALinkPreviewsIt() throws {
         _ = openArticle(typing: "photosyn", choosing: "Photosynthesis")
+        // "proton gradient" leads to a page that only forwards to a section of Electrochemical
+        // gradient, so the preview is of that article, and Save would save it.
+        let forwarding = app.webViews.firstMatch.links["proton gradient"].firstMatch
+        XCTAssertTrue(forwarding.waitForExistence(timeout: 10), "no link to a forwarding page")
+        forwarding.press(forDuration: 1.2)
+        XCTAssertTrue(app.otherElements["Electrochemical gradient"].waitForExistence(timeout: 10),
+                      "a link to a forwarding page does not preview the article it forwards to")
+        app.buttons["Copy Title"].tap() // closes the menu
         let link = app.webViews.firstMatch.links["algae"].firstMatch
         XCTAssertTrue(link.waitForExistence(timeout: 10), "no link to press")
         link.press(forDuration: 1.2)
