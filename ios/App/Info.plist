@@ -20,6 +20,19 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- wikireader://article/<path>, wikireader://search?q=<words>, wikireader://open?url=<address>:
+	     how other apps, shortcuts and links ask for an article (Links.swift). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.offlinewiki.reader</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>wikireader</string>
+			</array>
+		</dict>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<!-- These two make the app's Documents folder a place files can be put: over USB from the

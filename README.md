@@ -246,7 +246,11 @@ keeps to a column of comfortable width, while tables can use the whole screen. A
 saves the article to come back to, finds a word in it, shares it, or opens it on wikipedia.org.
 Saved articles are listed on the search screen above
 the recently read ones, and keep how far you read them. Swipe a row to remove it from either list;
-Clear empties Recently read. Like the Android app, it opens where you left it. Wikipedia and its index are
+Clear empties Recently read. A wikipedia.org address pasted into the search field finds its
+article. Other apps and shortcuts can open `wikireader://article/<title>` (the title as a
+Wikipedia address spells it, such as `Capital_city`), `wikireader://search?q=<words>`, or
+`wikireader://open?url=<a wikipedia.org address>`. Like the Android app, it opens where you left
+it. Wikipedia and its index are
 kept out of iCloud and computer backups: they would use tens of gigabytes there, and can be
 downloaded again.
 

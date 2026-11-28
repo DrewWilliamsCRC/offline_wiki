@@ -117,6 +117,26 @@ final class Library {
         return article(hit, in: files.zim)
     }
 
+    /// The language of this copy, from its file's name (`wikipedia_en_...`); nil if the name says none.
+    var language: String? {
+        let parts = fileName.split(separator: "_")
+        guard parts.count >= 2, parts[0] == "wikipedia", parts[1].allSatisfy({ $0.isLetter || $0 == "-" }) else { return nil }
+        return String(parts[1])
+    }
+
+    /// The article at `path` with redirects followed, and the other name it was asked for by, if
+    /// it was one; nil if this copy lacks it. Wikipedia's addresses may start with a small letter
+    /// where its titles have a capital, so that is tried too.
+    func article(at path: String) -> Article? {
+        guard let zim = try? open().zim else { return nil }
+        let capital = path.prefix(1).uppercased() + path.dropFirst()
+        for candidate in [path, capital] {
+            guard let entry = try? zim.find(namespace: "C", path: candidate), let target = try? zim.resolve(entry) else { continue }
+            return Article(title: target.title, path: target.path, foundAs: target.index == entry.index ? nil : entry.title)
+        }
+        return nil
+    }
+
     /// Where an article path really leads once redirects are followed; nil if this copy lacks it.
     func resolvePath(_ path: String) -> String? {
         guard let zim = try? open().zim, let entry = try? zim.find(namespace: "C", path: path) else { return nil }

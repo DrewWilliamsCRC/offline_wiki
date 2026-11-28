@@ -437,6 +437,16 @@ Things to know:
   recent ones. The search screen lists Saved above Recently read; a row of either is swiped away
   (`forget`, `removeSaved`), and Clear in Recently read's header asks, then empties it
   (`forgetAll`). The Android app has neither yet.
+- **Links into the app** (`Links.swift`): `wikireader://article/<path>`, `wikireader://search?q=`
+  and `wikireader://open?url=<wikipedia.org address>`, declared in `Info.plist`
+  (`CFBundleURLTypes`). `RootView.onOpenURL` hands a `Link` to `Requests`; `SearchView` takes it
+  (in `onChange`, and in `onAppear` for one that came before a Wikipedia was open) and replaces
+  whatever is on screen. A wikipedia.org address typed or pasted into the search field is read the
+  same way (`Link.page(typed:)`) and found with `Library.article(at:)`, which follows redirects and
+  also tries a capital first letter, as Wikipedia does. An address in another language than the
+  file's name gives is answered with a note, not the article of the same name. What comes in is
+  untrusted: only a path or words are taken from it, never an address to load.
+  `testOpensItsOwnAddresses` needs `XCUIApplication.open`, from iOS 16.4.
 - **The search screen's last line says how old the copy is** ("Wikipedia as of June 2026", from
   the file's name). Past six months it adds that a newer copy may be out and opens Downloads. It
   never checks the catalog itself: the app uses the network only when asked.

@@ -7,6 +7,7 @@ struct WikiReaderApp: App {
     @StateObject private var store = LibraryStore()
     @StateObject private var history = History()
     @StateObject private var downloads = Downloads.shared
+    @StateObject private var requests = Requests()
 
     init() {
         ArticleView.adoptSystemTextSize()
@@ -18,6 +19,7 @@ struct WikiReaderApp: App {
                 .environmentObject(store)
                 .environmentObject(history)
                 .environmentObject(downloads)
+                .environmentObject(requests)
         }
     }
 }
@@ -27,6 +29,7 @@ struct RootView: View {
     @EnvironmentObject private var store: LibraryStore
     @EnvironmentObject private var history: History
     @EnvironmentObject private var downloads: Downloads
+    @EnvironmentObject private var requests: Requests
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -58,6 +61,13 @@ struct RootView: View {
                 store.reload()
                 if case .ready = store.state { downloads.showing = false }
             }
+        }
+        // An article or a search asked for from outside (see Link). The search screen acts on it,
+        // over the downloads screen if that is up.
+        .onOpenURL { url in
+            guard let link = Link(url) else { return }
+            downloads.showing = false
+            requests.pending = link
         }
         // Here rather than on the screens beneath, which can change while it is up.
         .sheet(isPresented: $downloads.showing) {
