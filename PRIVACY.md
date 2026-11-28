@@ -18,7 +18,9 @@ information about you.
   information about you is sent with those requests. Reading never uses the network.
 - **Files.** On Android the app reads and writes only in the one folder you choose for it. On
   iPhone and iPad it uses its own folder, and a folder you choose if you point it at one.
-- **Notifications** on Android show how a download is getting on. They are made on the device.
+- **Notifications** show how a download is getting on (Android), or say that one has finished or
+  stopped (iPhone and iPad, if you allow them when the first download starts). They are made on the
+  device, and nothing is sent.
 - **Children.** The app collects no information from anyone, children included.
 
 Questions: open an issue at <https://github.com/DrewWilliamsCRC/offline_wiki/issues>.

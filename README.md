@@ -213,7 +213,10 @@ Wikipedia comes from Kiwix, and the index from this repository's
 file is checked against its SHA-256 before the app uses it. Downloads use Wi-Fi only, carry on
 with the app in the background, and pick up where they stopped if interrupted; the app checks
 first that there is room. The full Wikipedia takes an hour or more, depending on the connection;
-the small ones, a few minutes.
+the small ones, a few minutes. On iPhone and iPad a notification says when a download has arrived
+or has stopped, if you allow it when the first one starts. The full Wikipedia's check takes longer
+than iOS lets an app run out of sight, so for that one the notification asks you to open the app
+to finish it.
 
 What is on offer is up to `./wiki.sh publish` on this Mac. It looks for Kiwix's newest snapshot of
 each size, builds the index of any that has none yet (downloading it for that, then deleting it

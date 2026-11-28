@@ -30,6 +30,7 @@ final class DownloadUITests: XCTestCase {
 
         // It starts, and says how far it has got: the index first, then Wikipedia.
         button.tap()
+        allowNotifications()
         wait(for: button, label: "Pause", timeout: 30)
         XCTAssertTrue(text(beginningWith: "Downloading").waitForExistence(timeout: 120), "no progress shown")
         shot("d2-downloading")
@@ -102,6 +103,12 @@ final class DownloadUITests: XCTestCase {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: timeout), .completed,
                        "the button says \"\(element.label)\", not \"\(label)\"")
+    }
+
+    /// Answers iOS's question about notifications, which comes with the first download only.
+    private func allowNotifications() {
+        let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]
+        if allow.waitForExistence(timeout: 10) { allow.tap() }
     }
 
     private func shot(_ name: String) {

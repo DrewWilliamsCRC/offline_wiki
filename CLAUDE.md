@@ -225,6 +225,15 @@ Things that span files:
   - Android runs the download in a foreground service (`dataSync`) with a wake lock, and the
     screen reads `Downloads.status` every two seconds, changing only text that changed (e-ink).
     iOS wakes through `AppDelegate`'s background-session handler.
+  - **iOS says how a download ended when the app is out of sight**, with a notification in the
+    downloads screen's words (`Downloads.tell`): ready, stopped, or arrived but still to be
+    checked. Permission is asked when the first download starts, not at launch. A check that
+    starts out of sight asks for background time (`Downloads.holdOn`), which iOS limits to about
+    half a minute: enough for the smaller sizes, not for the full Wikipedia's 54 GB. When it runs
+    out the notification says to open the app to finish, and never that the book is ready, and
+    the check carries on when the app comes forward. A tap on a stopped or unchecked one opens
+    the downloads screen. The simulator does not enforce the limit (a check there runs to the end
+    out of sight), so that path shows only on a device.
   - A first Wikipedia opens as soon as it arrives, judged at the moment the download ends (not
     later, when a deletion has left nothing open). One that arrives while another is open is not
     switched to on the spot, so as not to pull the reader out of an article: the downloads
@@ -364,17 +373,20 @@ Things to know:
   nine in the iPad simulator). `WebController` therefore watches `title` and files the article in
   the history once both have happened. Reading `webView.title` in `didFinish` blanks the title bar
   and drops the article from the history on those loads.
-- **Three UI tests use the network.** `testDownloadsListsWhatCanBeDownloaded` reads the published
-  catalog. `DownloadUITests` downloads the best-known articles for real (about 3 GB, five minutes
-  or more), pausing, carrying on and relaunching on the way, so it runs only with
+- **Four UI tests use the network.** `testDownloadsListsWhatCanBeDownloaded` reads the published
+  catalog. `NoticeUITests` (`TEST_RUNNER_DOWNLOAD=1`) downloads the 0.3 GB build with the app sent
+  to the home screen, waits for the notification that it is ready, taps it, and deletes the book
+  again. The first download makes iOS ask about notifications; the tests answer through SpringBoard
+  (`allowNotifications`). `DownloadUITests` downloads the best-known articles for real (about 3 GB,
+  five minutes or more), pausing, carrying on and relaunching on the way, so it runs only with
   `TEST_RUNNER_DOWNLOAD=1`, and wants a fresh app: `xcrun simctl uninstall <simulator>
-  dev.offlinewiki.reader` first. `UpdateUITests` (`TEST_RUNNER_UPDATE=1`) updates an older
-  snapshot of the 0.3 GB build and then deletes it; the older snapshot is the catalog's own file
-  copied into the app's Documents under an earlier date, as the comment at its top shows. The
-  downloads list makes only the rows on screen, so the tests scroll to a book before using it.
-  In the Android emulator the same is done by hand: rename a `.zim` and its `.idx` to an earlier
-  date to get Update, `fallocate` a file in `/data/local/tmp` to run short of room for Replace,
-  and `truncate -s <size>` on a `.part` to see the checksum refuse a damaged file.
+  dev.offlinewiki.reader` first. `UpdateUITests` (`TEST_RUNNER_UPDATE=1`) updates an older snapshot
+  of the 0.3 GB build and then deletes it; the older snapshot is the catalog's own file copied into
+  the app's Documents under an earlier date, as the comment at its top shows. The downloads list
+  makes only the rows on screen, so the tests scroll to a book before using it. In the Android
+  emulator the same is done by hand: rename a `.zim` and its `.idx` to an earlier date to get
+  Update, `fallocate` a file in `/data/local/tmp` to run short of room for Replace, and
+  `truncate -s <size>` on a `.part` to see the checksum refuse a damaged file.
 - **Wikipedia stays out of backups.** iOS backs up Documents and Application Support to iCloud
   and to a computer. `LibraryStore.keepOutOfBackups` marks each `.zim` and `.zim.idx` in Documents
   as excluded (`isExcludedFromBackup`) every time `reload` looks for files, and after a download
