@@ -243,16 +243,16 @@ view with back/forward, a menu of the article's sections, text size and a dark a
 text starts at the size set for the whole device (Settings, Display & Brightness, Text Size), and
 A− / A+ adjust it from there. On a wide screen, an iPad's or a phone's turned sideways, the text
 keeps to a column of comfortable width, while tables can use the whole screen. A menu at the top
-saves the article to come back to, finds a word in it, shares it, or opens it on wikipedia.org.
-Saved articles are listed on the search screen above
-the recently read ones, and keep how far you read them. Swipe a row to remove it from either list;
-Clear empties Recently read. A wikipedia.org address pasted into the search field finds its
-article. Other apps and shortcuts can open `wikireader://article/<title>` (the title as a
-Wikipedia address spells it, such as `Capital_city`), `wikireader://search?q=<words>`, or
+saves the article to come back to, finds a word in it, shares it, or opens it on wikipedia.org. A
+long press on a link shows the opening paragraph of the article it leads to, and can open, save,
+share it or copy its title. Saved articles are listed on the search screen above the recently read
+ones, and keep how far you read them. Swipe a row to remove it from either list; Clear empties
+Recently read. A wikipedia.org address pasted into the search field finds its article. Other apps
+and shortcuts can open `wikireader://article/<title>` (the title as a Wikipedia address spells it,
+such as `Capital_city`), `wikireader://search?q=<words>`, or
 `wikireader://open?url=<a wikipedia.org address>`. Like the Android app, it opens where you left
-it. Wikipedia and its index are
-kept out of iCloud and computer backups: they would use tens of gigabytes there, and can be
-downloaded again.
+it. Wikipedia and its index are kept out of iCloud and computer backups: they would use tens of
+gigabytes there, and can be downloaded again.
 
 It passes its tests in the iPhone and iPad simulators against the full Wikipedia file, and runs on
 an iPhone with that file on board. `./wiki.sh` does not build or install it; the steps are by hand

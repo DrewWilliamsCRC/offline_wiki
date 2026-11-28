@@ -437,6 +437,13 @@ Things to know:
   recent ones. The search screen lists Saved above Recently read; a row of either is swiped away
   (`forget`, `removeSaved`), and Clear in Recently read's header asks, then empties it
   (`forgetAll`). The Android app has neither yet.
+- **A long press on a link** (`WebController`'s `WKUIDelegate` extension) previews the article
+  it leads to: its title and opening paragraph (`ArticleServer.summary`: the first `<p>` with
+  real text, footnote marks, styles and the ⓘ of sound files left out, a forwarding page followed
+  once), read off the main thread, with Open, Save, Share and Copy Title. Tapping the preview
+  opens it. A link out of Wikipedia gets Open in Browser and Copy Link; one within the page
+  (a footnote, a section) gets no menu, since WebKit's own preview would try the web. The preview's
+  texts reach UI tests as "other" elements, not static texts.
 - **Links into the app** (`Links.swift`): `wikireader://article/<path>`, `wikireader://search?q=`
   and `wikireader://open?url=<wikipedia.org address>`, declared in `Info.plist`
   (`CFBundleURLTypes`). `RootView.onOpenURL` hands a `Link` to `Requests`; `SearchView` takes it
