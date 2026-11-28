@@ -2,12 +2,13 @@ import SwiftUI
 import WikiCore
 
 /// One article, with back/forward through the articles reached from it, a menu of its sections
-/// and a text size control, and a menu to find a word in it, share it or open it on
+/// and a text size control, and a menu to save it, find a word in it, share it or open it on
 /// wikipedia.org. `position` is how far down it to start: 0 for the top, up to 1.
 struct ArticleView: View {
     let article: Library.Article
     let position: Double
     @StateObject private var web: WebController
+    @ObservedObject private var history: History
     /// The reader's choice, as a percent of the system's text size (Settings, Display, Text Size).
     @AppStorage("textSize") private var textSize = 100
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -19,6 +20,7 @@ struct ArticleView: View {
         self.article = article
         self.position = position
         _web = StateObject(wrappedValue: WebController(library: library, history: history))
+        _history = ObservedObject(wrappedValue: history)
     }
 
     var body: some View {
@@ -30,6 +32,14 @@ struct ArticleView: View {
                 // The bottom bar is full, so these go in a menu in the navigation bar.
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        // Only an article that is filed in the history can be saved, so not "Not found".
+                        if let article = web.article {
+                            if history.isSaved(article.path) {
+                                Button { history.removeSaved(path: article.path) } label: { Label("Remove from Saved", systemImage: "bookmark.slash") }
+                            } else {
+                                Button { history.addSaved(article) } label: { Label("Save", systemImage: "bookmark") }
+                            }
+                        }
                         Button { web.find() } label: { Label("Find in Article", systemImage: "magnifyingglass") }
                         if let address = web.onlineAddress, let article = web.article {
                             ShareLink(item: address, subject: Text(article.title)) { Label("Share", systemImage: "square.and.arrow.up") }

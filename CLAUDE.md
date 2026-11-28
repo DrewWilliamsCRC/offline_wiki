@@ -393,12 +393,20 @@ Things to know:
   does nothing, so A- / A+ never changed an iPad's text (the size test found it), and a page with
   wide content (Paris, with its infobox) was shrunk to fit, its text smaller than other articles'.
   An iPhone is in mobile mode anyway.
-- **The article menu** (a `ToolbarItem(.primaryAction)` in `ArticleView`) holds Find in Article,
-  the system's find bar (`isFindInteractionEnabled`), and Share and Open on Wikipedia, which use
-  `WebController.article`: the page on screen as filed in the history, nil for "Not found" and
-  forwarding pages. The address is `https://<language>.wikipedia.org/wiki/<path>`, the language
-  taken from the file's name and the path percent-encoded, "?" included. Further article actions
-  belong in this menu: the bottom bar is full.
+- **The article menu** (a `ToolbarItem(.primaryAction)` in `ArticleView`) holds Save (or Remove
+  from Saved), Find in Article, the system's find bar (`isFindInteractionEnabled`), and Share and
+  Open on Wikipedia. Save, Share and Open use `WebController.article`: the page on screen as filed
+  in the history, nil for "Not found" and forwarding pages. The address is
+  `https://<language>.wikipedia.org/wiki/<path>`, the language taken from the file's name and the
+  path percent-encoded, "?" included. Further article actions belong in this menu: the bottom bar
+  is full.
+- **Saved articles live in `History`**, beside the recent ones: `History.saved`, newest first, with
+  no limit, in `Application Support/saved.json` (backed up, unlike Wikipedia: it is small and
+  cannot be downloaded again). Reading places are kept for the articles in either list
+  (`History.save` prunes the rest), so a saved article keeps its place after it has left the 40
+  recent ones. The search screen lists Saved above Recently read; a row of either is swiped away
+  (`forget`, `removeSaved`), and Clear in Recently read's header asks, then empties it
+  (`forgetAll`). The Android app has neither yet.
 - **The search screen's last line says how old the copy is** ("Wikipedia as of June 2026", from
   the file's name). Past six months it adds that a newer copy may be out and opens Downloads. It
   never checks the catalog itself: the app uses the network only when asked.

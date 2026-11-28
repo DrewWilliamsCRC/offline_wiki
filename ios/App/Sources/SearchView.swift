@@ -7,8 +7,9 @@ struct Reading: Hashable {
     var position: Double = 0
 }
 
-/// The search field and its results; with an empty field it lists recently read articles instead,
-/// each with how far it was read.
+/// The search field and its results. With an empty field it lists instead the articles the reader
+/// saved and those read recently, each with how far it was read; a row is removed by swiping it,
+/// and the recent ones can be cleared all at once.
 struct SearchView: View {
     let library: Library
     @EnvironmentObject private var history: History
@@ -17,6 +18,7 @@ struct SearchView: View {
     @State private var searched = ""          // the query `results` belongs to
     @State private var stack: [Reading] = []
     @State private var started = false
+    @State private var confirmingClear = false
     @EnvironmentObject private var downloads: Downloads
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
@@ -31,16 +33,35 @@ struct SearchView: View {
                     Button("Random article") {
                         if let article = library.randomArticle() { stack.append(Reading(article: article)) }
                     }
+                    if !history.saved.isEmpty {
+                        Section("Saved") {
+                            rows(history.saved, withPlace: true) { history.removeSaved(path: $0.path) }
+                        }
+                    }
                     if !history.articles.isEmpty {
-                        Section("Recently read") { rows(history.articles, recent: true) }
+                        Section {
+                            rows(history.articles, withPlace: true) { history.forget(path: $0.path) }
+                        } header: {
+                            HStack {
+                                Text("Recently read")
+                                Spacer()
+                                Button("Clear") { confirmingClear = true }
+                            }
+                        }
                     }
                 } else if results.isEmpty && searched == trimmed {
                     Text("No titles match.").foregroundStyle(.secondary)
                 } else {
-                    rows(results, recent: false)
+                    rows(results, withPlace: false)
                 }
             }
             .listStyle(.plain)
+            .confirmationDialog("Clear the list of recently read articles?", isPresented: $confirmingClear, titleVisibility: .visible) {
+                Button("Clear the List", role: .destructive) { history.forgetAll() }
+                Button("Keep", role: .cancel) {}
+            } message: {
+                Text("Saved articles stay saved, with how far each was read.")
+            }
             .safeAreaInset(edge: .bottom) { age }
             .navigationTitle("Wikipedia")
             .navigationDestination(for: Reading.self) { reading in
@@ -94,11 +115,12 @@ struct SearchView: View {
         return (year * 12 + month) - (parts[0] * 12 + parts[1])
     }
 
-    /// `recent` rows open where the reader left the article, and say how far that is.
+    /// `withPlace` rows open where the reader left the article, and say how far that is. Rows with
+    /// `remove` can be swiped away.
     @ViewBuilder
-    private func rows(_ articles: [Library.Article], recent: Bool) -> some View {
+    private func rows(_ articles: [Library.Article], withPlace: Bool, remove: ((Library.Article) -> Void)? = nil) -> some View {
         ForEach(articles) { article in
-            let position = recent ? history.position(of: article.path) : 0
+            let position = withPlace ? history.position(of: article.path) : 0
             NavigationLink(value: Reading(article: article, position: position)) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(article.title).font(.body.weight(.medium))
@@ -107,6 +129,11 @@ struct SearchView: View {
                     } else if Int(position * 100) >= 1 {
                         Text("\(Int(position * 100))% read").font(.footnote).foregroundStyle(.secondary)
                     }
+                }
+            }
+            .swipeActions {
+                if let remove {
+                    Button(role: .destructive) { remove(article) } label: { Label("Remove", systemImage: "trash") }
                 }
             }
         }
