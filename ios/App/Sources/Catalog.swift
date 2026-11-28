@@ -77,6 +77,18 @@ struct Snapshot {
         date = String(match.2)
     }
 
+    /// What a book holds, in a few words, from its name: "every article, without pictures" for
+    /// `wikipedia_en_all_nopic`. Nil for a name not made the way Kiwix makes them.
+    static func kind(of book: String) -> String? {
+        let parts = book.split(separator: "_")
+        guard parts.count >= 4 else { return nil }
+        let flavors = ["maxi": "with pictures", "nopic": "without pictures", "mini": "introductions only"]
+        guard let flavor = flavors[String(parts[parts.count - 1])] else { return nil }
+        let scope = parts[2...].dropLast().joined(separator: " ").replacingOccurrences(of: "-", with: " ")
+        let what = ["all": "every article", "top": "the best-known articles"][scope] ?? scope
+        return "\(what), \(flavor)"
+    }
+
     /// "September 2026".
     var month: String {
         let parts = date.split(separator: "-")

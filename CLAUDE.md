@@ -166,7 +166,11 @@ Things that span files:
   book (`<book>_<flavor>`, the name without its `_<year>-<month>.zim`) only the newest snapshot
   counts, then the biggest of those wins (`Library.findZim`, `LibraryStore.reload`). Newest before
   biggest, because an update can be smaller than what it replaces (Kiwix's "top" with pictures
-  went from 7.8 to 6.5 GB) and an older copy may linger beside it.
+  went from 7.8 to 6.5 GB) and an older copy may linger beside it. On iOS a book the reader
+  opened from the downloads screen (`LibraryStore.open(book:)`, kept as `preferredBook`) comes
+  before the biggest for as long as it is there, and is forgotten when it is deleted there; the
+  search screen's last line names the copy open when there are several (`Snapshot.kind`).
+  `-preferredBook <book>` sets it for one launch, as the UI tests do. Android has no choice yet.
 - **Both apps hold the files open only while on screen** (`Library.hold` and `release`, called from
   `MainActivity.onStart`/`onStop` and from `RootView`'s scene phase). Out of sight, a read opens
   them for just that read. Otherwise a snapshot deleted over USB would keep its 53 GB and `update`
@@ -238,7 +242,9 @@ Things that span files:
     later, when a deletion has left nothing open). One that arrives while another is open is not
     switched to on the spot, so as not to pull the reader out of an article: the downloads
     screen offers Open, and otherwise the app moves to it the next time it comes forward, as it
-    does for files copied over. On iOS the downloads sheet hangs off `RootView`, not the screen
+    does for files copied over, if it is the biggest and (on iOS) the reader has not chosen
+    another. On iOS the downloads screen offers Open on every book on the device but the one
+    open. On iOS the downloads sheet hangs off `RootView`, not the screen
     beneath, which can change while it is up.
 - **Articles are served to the WebView** from `https://wiki.offline/<zim path>` through
   `shouldInterceptRequest`, so the articles' relative links and stylesheets resolve unchanged.
@@ -373,7 +379,11 @@ Things to know:
   nine in the iPad simulator). `WebController` therefore watches `title` and files the article in
   the history once both have happened. Reading `webView.title` in `didFinish` blanks the title bar
   and drops the article from the history on those loads.
-- **Four UI tests use the network.** `testDownloadsListsWhatCanBeDownloaded` reads the published
+- **`ChooseUITests`** (`TEST_RUNNER_CHOOSE=1`) opens one of two books from the downloads screen
+  and back. The two are the catalog's own files cloned into the app's Documents (`cp -c`, which
+  takes no room, even of the 53 GB file), as the comment at its top shows; it needs the network
+  for the catalog. Remove the clones afterwards, or the `WIKI_DIR` tests see each book twice.
+- **Four more UI tests use the network.** `testDownloadsListsWhatCanBeDownloaded` reads the published
   catalog. `NoticeUITests` (`TEST_RUNNER_DOWNLOAD=1`) downloads the 0.3 GB build with the app sent
   to the home screen, waits for the notification that it is ready, taps it, and deletes the book
   again. The first download makes iOS ask about notifications; the tests answer through SpringBoard
