@@ -347,6 +347,14 @@ final class ArticleServer: NSObject {
     //  - and so is a settlement infobox's flag, seal or coat of arms without its picture, which
     //    would leave just its caption, with their whole row when nothing else is in it. A row that
     //    also holds a table (Melbourne's neighbouring places) stays;
+    //  - on a wide screen (an iPad's, or a phone's turned sideways) the text keeps to a centred
+    //    column of 40em, about 80 characters, rather than lines too long to follow. Tables and the
+    //    floats beside the text (infoboxes) keep the full width. The rules apply only when the
+    //    article is wider than that column (a container query), so a narrow screen, or text made
+    //    large, keeps the layout and side margins it had. What lies outside the article's text
+    //    (the title bar, the categories, the licence line) gets a width rather than a limit: on a
+    //    wide screen the skin lays the page out as a grid, where auto margins would shrink the
+    //    title bar to its title;
     //  - a jump to a section puts its heading at the top of the screen. Wikipedia's skin leaves 75px
     //    above it for a sticky header that is not here;
     //  - a dark appearance that follows the system setting.
@@ -366,6 +374,13 @@ final class ArticleServer: NSObject {
         .infobox tr:has(>td.maptable):not(:has(img:not([src^="data:image/svg+xml"]),table)){display:none!important}
         .mw-heading :is(h1,h2,h3,h4,h5,h6){scroll-margin-top:8px!important}
         table{max-width:100%!important}
+        .mw-parser-output{container-type:inline-size}
+        @container (min-width:42em){
+        :is(.mw-parser-output,section)>:not(section,table,figure,.thumb,.gallery,style,link,meta,[style*=margin],:has(table)){max-width:40em;margin-left:auto!important;margin-right:auto!important}
+        :is(.mw-parser-output,section)>:is(ul,ol):not(.gallery){margin-left:max(1.6em,calc((100% - 40em)/2))!important}
+        :is(.mw-parser-output,section)>table.wikitable:not([style*=float]){margin-left:auto!important;margin-right:auto!important}
+        }
+        .mw-body-header,.catlinks,.zim-footer{width:40em;max-width:100%;box-sizing:border-box;margin-left:auto!important;margin-right:auto!important}
         pre{white-space:pre-wrap!important}
         @media (prefers-color-scheme: dark){
         html,body{background:#000!important}

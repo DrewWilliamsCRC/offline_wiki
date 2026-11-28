@@ -405,6 +405,14 @@ Things to know:
   does nothing, so A- / A+ never changed an iPad's text (the size test found it), and a page with
   wide content (Paris, with its infobox) was shrunk to fit, its text smaller than other articles'.
   An iPhone is in mobile mode anyway.
+- **On a wide screen the text keeps to a centred 40em column** (`ArticleServer.style`): an iPad,
+  or an iPhone turned sideways. Tables and the infobox keep the whole width. The rules sit in a
+  container query on `.mw-parser-output`, so where the column would not fit (a phone held upright,
+  or text made large) nothing changes, side margins included. From 1120 points the skin makes
+  `.mw-body` a grid, where auto margins shrink an item to its content, so the title bar (and the
+  categories and licence line at the end) get a width rather than a limit. `em` follows A- / A+,
+  so a line holds the same words at any text size. `testLinesStayReadableOnAWideScreen` turns the
+  iPad sideways and measures the widest text outside tables; it is skipped on iPhone.
 - **The article menu** (a `ToolbarItem(.primaryAction)` in `ArticleView`) holds Save (or Remove
   from Saved), Find in Article, the system's find bar (`isFindInteractionEnabled`), and Share and
   Open on Wikipedia. Save, Share and Open use `WebController.article`: the page on screen as filed
