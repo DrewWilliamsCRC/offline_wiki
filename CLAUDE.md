@@ -324,6 +324,11 @@ copies the one the owner's Lighthouse Mobile app uses, on the same team.
   internal group with access to every build, and its members, each already a user of the team.
 - **A build stops opening 90 days after its upload.** Upload a new one before then, even with no
   change.
+- **The App Store listing** (texts, age rating answers, review notes, and how its screenshots are
+  taken) is `ios/AppStore.md`, with the screenshots in `ios/AppStore/screenshots/`. A build can be
+  chosen for an App Store version only if its `MARKETING_VERSION` equals that version's number
+  (1.0 for the first). App Store Connect shows the app's icon only once a build is chosen for
+  the version; until then the Apps page shows a placeholder.
 - **The privacy manifest** is `ios/App/PrivacyInfo.xcprivacy`. App Store Connect wants a reason for
   each "required reason" API: it declares `UserDefaults` (`CA92.1`), file timestamps (`C617.1`
   for the Documents folder, `3B52.1` for a folder the reader picked), which `LibraryStore.stamp`
