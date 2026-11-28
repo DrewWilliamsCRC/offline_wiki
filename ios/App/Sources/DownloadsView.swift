@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The books in the `Catalog` (each size of Wikipedia on offer), each with how much of it is here
-/// and what can be done: download it, pause, carry on, open it once it has arrived, update an older
-/// snapshot of it, or delete it. The download itself runs in `Downloads`. The Android app's
+/// and what can be done: download it, pause, carry on, open it in place of the one being read,
+/// update an older snapshot of it, or delete it. The download itself runs in `Downloads`. The Android app's
 /// DownloadScreen says and offers the same.
 struct DownloadsView: View {
     @EnvironmentObject private var downloads: Downloads
@@ -99,11 +99,11 @@ struct DownloadsView: View {
             return Look(state: downloads.doing.hasSuffix("%") ? downloads.doing : "\(downloads.doing): \(progress)", first: "Pause")
         }
         if downloads.complete(book) {
-            // Open is for one that has just arrived and is not the one open already.
-            if mine && downloads.doing == "Done" && !isOpen(book) {
-                return Look(state: "Downloaded. It is ready to read.", first: "Open")
-            }
-            return Look(state: "On this device: \(snapshot).", first: downloads.running ? nil : "Delete")
+            let delete = downloads.running ? nil : "Delete"
+            if isOpen(book) { return Look(state: "On this device: \(snapshot). This is the one open.", first: delete) }
+            // Any other book that is here can be read in its place.
+            let arrived = mine && downloads.doing == "Done"
+            return Look(state: arrived ? "Downloaded. It is ready to read." : "On this device: \(snapshot).", first: "Open", second: delete)
         }
         if mine, let problem = downloads.problem {
             return Look(state: problem, first: "Try again", second: older != nil ? "Delete" : nil)
@@ -129,7 +129,7 @@ struct DownloadsView: View {
         switch action {
         case "Pause": downloads.pause()
         case "Open":
-            store.reload()
+            store.open(book: book.id)
             dismiss()
         case "Delete": confirming = Confirming(book: book, replace: false)
         case "Replace": confirming = Confirming(book: book, replace: true)
@@ -159,6 +159,7 @@ struct DownloadsView: View {
         } else {
             store.letGo(of: Set(downloads.files(of: asked.book).map(\.lastPathComponent)))
             downloads.delete(asked.book)
+            store.forget(book: asked.book.id)
             store.reload()
         }
     }

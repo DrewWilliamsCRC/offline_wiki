@@ -362,6 +362,27 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Photosynthesis"].exists)
     }
 
+    /// With more than one copy of Wikipedia on the device, the biggest is read unless the reader
+    /// chose another, and the search screen says which is open. (Choosing one on the downloads
+    /// screen is ChooseUITests; here the choice is made for one launch by an argument.)
+    func testSaysWhichCopyIsOpen() throws {
+        let folder = ProcessInfo.processInfo.environment["WIKI_DIR"] ?? ""
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []
+        try XCTSkipUnless(["wikipedia_en_all_nopic_", "wikipedia_en_top_nopic_"].allSatisfy { prefix in names.contains { $0.hasPrefix(prefix) } },
+                          "needs both the full and the \"top\" Wikipedia in TEST_RUNNER_WIKI_DIR")
+        func footer(_ kind: String) -> XCUIElement {
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label BEGINSWITH 'Wikipedia as of ' AND label CONTAINS %@", kind)).firstMatch
+        }
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(footer("every article, without pictures").waitForExistence(timeout: 10), "the biggest copy is not the one open, or not named")
+        shot("22-which-copy")
+        app.terminate()
+        app.launchArguments = ["-reading", "NO", "-preferredBook", "wikipedia_en_top_nopic"]
+        app.launch()
+        XCTAssertTrue(footer("the best-known articles, without pictures").waitForExistence(timeout: 15), "the chosen copy was not opened")
+    }
+
     /// Searches for `query`, opens the result titled `title`, and returns the article's heading.
     private func openArticle(typing query: String, choosing title: String) -> XCUIElement {
         let field = app.searchFields.firstMatch

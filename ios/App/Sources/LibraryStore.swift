@@ -13,7 +13,10 @@ final class LibraryStore: ObservableObject {
     }
 
     @Published private(set) var state: State = .missing("")
+    /// Each book found (`Snapshot.book`, as the catalog's ids are), the one to open first.
+    @Published private(set) var books: [String] = []
     private var chosenFolder: URL? // kept so its security scope stays open while files are in use
+    private static let preferredKey = "preferredBook"
 
     private var library: Library? {
         if case .ready(let library) = state { return library }
@@ -37,12 +40,19 @@ final class LibraryStore: ObservableObject {
 
         // Prefer files that have their index. Of each book only its newest snapshot counts, so that
         // an older copy left beside an update is not read instead, even when it is bigger. Of what
-        // is left, the biggest first: the fullest Wikipedia.
+        // is left, the book the reader chose to read (`open(book:)`) while it is here, and
+        // otherwise the biggest first: the fullest Wikipedia.
         let all = folders.flatMap(zimFiles)
         let indexed = all.contains(where: \.hasIndex) ? all.filter(\.hasIndex) : all
-        let newest = Dictionary(grouping: indexed) { Snapshot($0.url.lastPathComponent)?.book ?? $0.url.lastPathComponent }
+        let newest = Dictionary(grouping: indexed) { LibraryStore.book(of: $0.url) }
             .values.compactMap { $0.max { (Snapshot($0.url.lastPathComponent)?.date ?? "") < (Snapshot($1.url.lastPathComponent)?.date ?? "") } }
-        let candidates = newest.sorted { $0.size > $1.size }
+        let preferred = UserDefaults.standard.string(forKey: LibraryStore.preferredKey)
+        let candidates = newest.sorted { a, b in
+            let (pa, pb) = (LibraryStore.book(of: a.url) == preferred, LibraryStore.book(of: b.url) == preferred)
+            return pa != pb ? pa : a.size > b.size
+        }
+        let found = candidates.map { LibraryStore.book(of: $0.url) }
+        if found != books { books = found }
         if let library, let first = candidates.first, library.stamp == LibraryStore.stamp(of: first.url) {
             library.hold()
             return
@@ -63,6 +73,23 @@ final class LibraryStore: ObservableObject {
         }
         state = .missing(problem)
     }
+
+    /// Reads `book` from now on, in place of the biggest, for as long as it is here.
+    func open(book: String) {
+        UserDefaults.standard.set(book, forKey: LibraryStore.preferredKey)
+        reload()
+    }
+
+    /// Forgets that `book` was chosen, when it is deleted: downloaded again later, it is one more
+    /// book, not the reader's choice.
+    func forget(book: String) {
+        if UserDefaults.standard.string(forKey: LibraryStore.preferredKey) == book {
+            UserDefaults.standard.removeObject(forKey: LibraryStore.preferredKey)
+        }
+    }
+
+    /// The book a Wikipedia file belongs to: its name without the date, or the whole name.
+    private static func book(of zim: URL) -> String { Snapshot(zim.lastPathComponent)?.book ?? zim.lastPathComponent }
 
     /// Marks Wikipedia and its index in `folder` as not to be backed up. iOS backs up Documents to
     /// iCloud and to a computer by default, and a 53 GB file that can be downloaded again would use

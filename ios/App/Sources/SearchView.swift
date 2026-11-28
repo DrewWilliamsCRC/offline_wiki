@@ -20,6 +20,7 @@ struct SearchView: View {
     @State private var started = false
     @State private var confirmingClear = false
     @EnvironmentObject private var downloads: Downloads
+    @EnvironmentObject private var store: LibraryStore
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
 
@@ -90,13 +91,19 @@ struct SearchView: View {
 
     /// When this copy of Wikipedia was made, from its file's name: no network is needed to say so,
     /// and the app looks for newer ones only when asked, on the downloads screen. Past six months
-    /// it says a newer copy may be out, and leads there. Nothing for a file named otherwise.
+    /// it says a newer copy may be out, and leads there. With more than one copy on the device it
+    /// also says which this is, and leads to where another can be chosen. Nothing for a file named
+    /// otherwise.
     @ViewBuilder
     private var age: some View {
         if trimmed.isEmpty, let snapshot = Snapshot(library.fileName) {
+            let several = store.books.count > 1
+            let which = several ? Snapshot.kind(of: snapshot.book).map { ": \($0)" } ?? "" : ""
             Group {
                 if SearchView.monthsOld(snapshot) > 6 {
-                    Button("Wikipedia as of \(snapshot.month). A newer copy may be out: see Downloads.") { downloads.showing = true }
+                    Button("Wikipedia as of \(snapshot.month)\(which). A newer copy may be out: see Downloads.") { downloads.showing = true }
+                } else if several {
+                    Button("Wikipedia as of \(snapshot.month)\(which). Another copy can be chosen in Downloads.") { downloads.showing = true }
                 } else {
                     Text("Wikipedia as of \(snapshot.month)").foregroundStyle(.secondary)
                 }

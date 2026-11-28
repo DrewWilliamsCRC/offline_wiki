@@ -200,7 +200,8 @@ They offer the sizes Kiwix publishes, from all of English Wikipedia to a small s
 | Best-known articles, introductions only | the opening paragraphs of the most-read articles | 0.3 GB |
 
 The app shows the ones that are available now (see below). With more than one on the device, it
-reads the biggest; e-ink screens show pictures in grey.
+reads the biggest; e-ink screens show pictures in grey. On iPhone and iPad, **Open** on the
+Downloads screen reads another one instead, and the search screen's last line says which is open.
 
 **Updates.** Kiwix publishes new snapshots every few months. When the Downloads screen knows of a
 newer one than the device has, it says so and offers **Update**: the new copy downloads beside the
