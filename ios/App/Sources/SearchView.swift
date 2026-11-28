@@ -21,6 +21,9 @@ struct SearchView: View {
     @State private var confirmingClear = false
     @EnvironmentObject private var downloads: Downloads
     @EnvironmentObject private var store: LibraryStore
+    @EnvironmentObject private var requests: Requests
+    /// Said in place of "No titles match." when the search was a wikipedia.org address.
+    @State private var note: String?
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
 
@@ -51,7 +54,7 @@ struct SearchView: View {
                         }
                     }
                 } else if results.isEmpty && searched == trimmed {
-                    Text("No titles match.").foregroundStyle(.secondary)
+                    Text(note ?? "No titles match.").foregroundStyle(.secondary)
                 } else {
                     rows(results, withPlace: false)
                 }
@@ -80,13 +83,41 @@ struct SearchView: View {
         }
         // Open where the app was left: on the article being read, as far down it as the reader was.
         .onAppear {
-            guard !started else { return }
-            started = true
-            if history.reading, let last = history.articles.first {
-                stack = [Reading(article: last, position: history.position(of: last.path))]
+            if !started {
+                started = true
+                if history.reading, let last = history.articles.first {
+                    stack = [Reading(article: last, position: history.position(of: last.path))]
+                }
             }
+            takeRequest() // one that came before there was a Wikipedia to show
         }
         .onChange(of: stack) { history.reading = !$0.isEmpty }
+        .onChange(of: requests.pending) { _ in takeRequest() }
+    }
+
+    private func takeRequest() {
+        guard let link = requests.pending else { return }
+        requests.pending = nil
+        act(on: link)
+    }
+
+    /// Shows what was asked for from outside the app, in place of whatever was on screen.
+    private func act(on link: Link) {
+        switch link {
+        case .article(let path):
+            // An article this copy lacks still opens, to the page that says so.
+            stack = [Reading(article: library.article(at: path) ?? Library.Article(title: path, path: path))]
+        case .search(let words):
+            stack = []
+            query = words
+        case .wikipedia(let language, let path):
+            if let mine = library.language, mine != language {
+                stack = []
+                query = "https://\(language).wikipedia.org/wiki/\(path)" // the search says why it cannot open
+            } else {
+                act(on: .article(path))
+            }
+        }
     }
 
     /// When this copy of Wikipedia was made, from its file's name: no network is needed to say so,
@@ -149,12 +180,27 @@ struct SearchView: View {
     /// Runs off the main thread. SwiftUI cancels this task when the query changes, and a result
     /// that arrives for a query no longer on screen is dropped.
     private func search(_ text: String) async {
+        note = nil
         guard !text.isEmpty else {
             results = []
             searched = ""
             return
         }
         let library = library
+        // A wikipedia.org address leads to its article, if this copy has it and is in its language.
+        if let page = Link.page(typed: text) {
+            let found = await Task.detached(priority: .userInitiated) { library.article(at: page.path) }.value
+            guard !Task.isCancelled else { return }
+            if let mine = library.language, mine != page.language {
+                note = "That address is for the \(Link.languageName(page.language)) Wikipedia; this copy is the \(Link.languageName(mine)) one."
+                results = []
+            } else {
+                note = found == nil ? "That article is not in this copy of Wikipedia." : nil
+                results = found.map { [$0] } ?? []
+            }
+            searched = text
+            return
+        }
         let found = await Task.detached(priority: .userInitiated) { library.search(text, limit: 40) }.value
         guard !Task.isCancelled else { return }
         results = found

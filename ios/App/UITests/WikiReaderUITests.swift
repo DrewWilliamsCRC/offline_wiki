@@ -383,6 +383,48 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertTrue(footer("the best-known articles, without pictures").waitForExistence(timeout: 15), "the chosen copy was not opened")
     }
 
+    /// A wikipedia.org address typed or pasted into the search field finds its article; one for
+    /// another language says so.
+    func testAddressInTheSearchField() throws {
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap()
+        field.typeText("https://en.m.wikipedia.org/wiki/USA")
+        // A redirect: the list says which name the address used, as for a search.
+        XCTAssertTrue(app.staticTexts["United States"].waitForExistence(timeout: 10), "the address did not find its article")
+        XCTAssertTrue(app.staticTexts["also: USA"].exists)
+        shot("23-address")
+        app.staticTexts["United States"].tap()
+        XCTAssertTrue(app.navigationBars["United States"].waitForExistence(timeout: 30), "the article did not open")
+
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.buttons["Clear text"].firstMatch.tap()
+        field.typeText("https://fr.wikipedia.org/wiki/Paris")
+        let note = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'That address is for the French Wikipedia'")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 10), "an address in another language was not explained")
+    }
+
+    /// Other apps and shortcuts open an article, a search or a wikipedia.org address through the
+    /// app's own wikireader:// addresses, over whatever is on screen.
+    func testOpensItsOwnAddresses() throws {
+        guard #available(iOS 16.4, *) else { throw XCTSkip("opening an address from a test needs iOS 16.4") }
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 15))
+        app.open(URL(string: "wikireader://article/Photosynthesis")!)
+        XCTAssertTrue(app.navigationBars["Photosynthesis"].waitForExistence(timeout: 20), "an article address did not open it")
+
+        // From inside an article, a search replaces it.
+        app.open(URL(string: "wikireader://search?q=algae")!)
+        XCTAssertTrue(app.staticTexts["Algae"].waitForExistence(timeout: 15), "a search address did not search")
+        XCTAssertEqual(app.searchFields.firstMatch.value as? String, "algae")
+
+        let address = "https://en.wikipedia.org/wiki/Capital_city".addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+        app.open(URL(string: "wikireader://open?url=\(address)")!)
+        XCTAssertTrue(app.navigationBars["Capital city"].waitForExistence(timeout: 20), "a wikipedia.org address did not open its article")
+        shot("24-opened-from-outside")
+    }
+
     /// Searches for `query`, opens the result titled `title`, and returns the article's heading.
     private func openArticle(typing query: String, choosing title: String) -> XCUIElement {
         let field = app.searchFields.firstMatch
