@@ -1,6 +1,6 @@
 #!/bin/bash
 # Archives Wiki Reader for iOS from an up-to-date main checkout and uploads it to TestFlight
-# (internal testing only). Runs without the Xcode app: signing and upload use an App Store Connect
+# (for the internal testers, and for the App Store once chosen for a version). Runs without the Xcode app: signing and upload use an App Store Connect
 # API key, kept outside the repository. See "TestFlight" in CLAUDE.md.
 #
 #   ~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8   the key (Team key, Admin), mode 600
