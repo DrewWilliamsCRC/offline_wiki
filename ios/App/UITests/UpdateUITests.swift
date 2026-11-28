@@ -37,6 +37,7 @@ final class UpdateUITests: XCTestCase {
 
         // It downloads beside the old one, which goes once the new one is in place.
         first.tap()
+        allowNotifications()
         wait(for: first, label: "Open", timeout: 15 * 60)
         XCTAssertTrue(app.staticTexts["Downloaded. It is ready to read."].exists)
         shot("u2-updated")
@@ -86,6 +87,12 @@ final class UpdateUITests: XCTestCase {
             sleep(2)
         }
         XCTFail("the button says \"\(element.exists ? element.label : "nothing")\", not \"\(label)\"")
+    }
+
+    /// Answers iOS's question about notifications, which comes with the first download only.
+    private func allowNotifications() {
+        let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]
+        if allow.waitForExistence(timeout: 10) { allow.tap() }
     }
 
     private func shot(_ name: String) {

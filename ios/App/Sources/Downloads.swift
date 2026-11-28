@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import UIKit
+import UserNotifications
 
 /// Downloads a book from the `Catalog` into the app's Documents folder, where `LibraryStore` looks
 /// for Wikipedia. One book at a time, through a background URL session: iOS carries the transfer
@@ -14,6 +15,9 @@ import UIKit
 /// A book's older snapshots in Documents (the same `<book>_<flavor>`, an earlier date) are an
 /// update's to replace: once the new one is in place they are deleted. `LibraryStore` reads only
 /// the newest anyway.
+///
+/// The full Wikipedia takes hours, so when a download ends with the app out of sight, a
+/// notification says how: arrived and ready, arrived but still to be checked, or stopped.
 @MainActor
 final class Downloads: NSObject, ObservableObject {
     static let shared = Downloads()
@@ -38,6 +42,8 @@ final class Downloads: NSObject, ObservableObject {
     private var session: URLSession!
     private var received: [String: Int64] = [:] // by file name: bytes so far of files under way
     private var checking: Set<String> = []
+    /// Time asked of iOS to go on checking with the app out of sight; see `holdOn`.
+    private var checkingTime = UIBackgroundTaskIdentifier.invalid
 
     private static let identifier = "dev.offlinewiki.reader.downloads"
     private static let bookKey = "download.book"
@@ -172,6 +178,8 @@ final class Downloads: NSObject, ObservableObject {
     func start(_ book: Catalog.Book) {
         guard !running else { return }
         problem = nil
+        Downloads.askToNotify()
+        Downloads.forgetNotice()
         if self.book?.id != book.id { received = [:] }
         self.book = book
         if let data = try? JSONEncoder().encode(book) { UserDefaults.standard.set(data, forKey: Downloads.bookKey) }
@@ -226,6 +234,7 @@ final class Downloads: NSObject, ObservableObject {
         running = false
         doing = "Stopped"
         save()
+        tell("The download stopped: \(message)", showDownloads: true)
     }
 
     /// Cancels the session's transfers, keeping resume data for each.
@@ -251,6 +260,11 @@ final class Downloads: NSObject, ObservableObject {
             doing = "Done"
             received = [:]
             save()
+            if UIApplication.shared.applicationState == .active {
+                Downloads.forgetNotice() // one that said it was still to be checked
+            } else {
+                tell("Downloaded. It is ready to read.", showDownloads: false)
+            }
             // Forgotten at the next launch: by then there is nothing to say about it.
             UserDefaults.standard.removeObject(forKey: Downloads.bookKey)
             arrivals += 1
@@ -265,7 +279,9 @@ final class Downloads: NSObject, ObservableObject {
         guard let book else { return }
         for file in book.files where !checking.contains(file.name) && FileManager.default.fileExists(atPath: Downloads.arrived(file.name).path) {
             checking.insert(file.name)
+            holdOn()
             let what = file.name.hasSuffix(".idx") ? "the index" : "Wikipedia"
+            doing = "Checking \(what): 0%" // until the first progress, which comes every 512 MB
             Task {
                 let result = await Downloads.check(file) { fraction in
                     Task { @MainActor in self.doing = "Checking \(what): \(Int(fraction * 100))%" }
@@ -293,8 +309,67 @@ final class Downloads: NSObject, ObservableObject {
                     fail(error.localizedDescription)
                 }
                 update()
+                if checking.isEmpty { letGo() }
             }
         }
+    }
+
+    // MARK: Checking out of sight
+
+    /// Asks iOS for time to go on checking with the app out of sight: when it has woken the app
+    /// because a file has arrived, or the reader leaves during a check. iOS gives about half a
+    /// minute. That is enough for the smaller sizes but not for all of Wikipedia (54 GB, a minute
+    /// or more), whose check then carries on when the app next comes forward.
+    private func holdOn() {
+        guard checkingTime == .invalid else { return }
+        checkingTime = UIApplication.shared.beginBackgroundTask(withName: "Checking a download") {
+            MainActor.assumeIsolated { self.outOfTime() }
+        }
+    }
+
+    private func outOfTime() {
+        guard !checking.isEmpty else { return letGo() }
+        // Not "ready": it is not, until its checksum has matched.
+        tell("Downloaded. Open Wiki Reader to finish checking it.", showDownloads: true) { self.letGo() }
+    }
+
+    private func letGo() {
+        guard checkingTime != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(checkingTime)
+        checkingTime = .invalid
+    }
+
+    // MARK: Telling the reader
+
+    private static let notice = "download"
+    nonisolated static let showDownloadsKey = "showDownloads"
+
+    /// Asked when a download starts, where the reader can see why, rather than at launch. iOS asks
+    /// the reader only the first time.
+    private static func askToNotify() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    /// Says how the download ended, in the downloads screen's words, unless the reader is looking
+    /// at the app. A newer notice replaces the one before. `then` runs once iOS has it.
+    private func tell(_ words: String, showDownloads: Bool, then: (() -> Void)? = nil) {
+        guard UIApplication.shared.applicationState != .active, let book else {
+            then?()
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = book.title
+        content.body = words
+        content.sound = .default
+        content.userInfo = [Downloads.showDownloadsKey: showDownloads]
+        let request = UNNotificationRequest(identifier: Downloads.notice, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { _ in
+            DispatchQueue.main.async { then?() }
+        }
+    }
+
+    private static func forgetNotice() {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [notice])
     }
 
     /// Reads a file that has arrived and compares its SHA-256 with the catalog's, away from the
@@ -403,12 +478,32 @@ extension Downloads: URLSessionDownloadDelegate {
     }
 }
 
-/// Hands iOS's wake-up for finished transfers to `Downloads`, whose session has to exist by then.
-final class AppDelegate: NSObject, UIApplicationDelegate {
+/// Hands iOS's wake-up for finished transfers to `Downloads`, whose session has to exist by then,
+/// and a tap on one of its notifications to the downloads screen.
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         _ = Downloads.shared
+        UNUserNotificationCenter.current().delegate = self // before launch ends, to hear of the tap that launched it
         return true
+    }
+
+    /// A download that stopped, or is still to be checked, opens the downloads screen, which says
+    /// more and has the button to carry on. One that is ready needs nothing: the app moves to a
+    /// newly arrived Wikipedia as it comes forward.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let show = response.notification.request.content.userInfo[Downloads.showDownloadsKey] as? Bool == true
+        Task { @MainActor in
+            if show { Downloads.shared.showing = true }
+            completionHandler()
+        }
+    }
+
+    /// Shown even if the app is in front but not active, under Control Centre for instance.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
     }
 
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
