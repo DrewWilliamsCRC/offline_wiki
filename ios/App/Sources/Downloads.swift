@@ -388,7 +388,11 @@ final class Downloads: NSObject, ObservableObject {
                 var hasher = SHA256()
                 var read: Int64 = 0
                 var shown: Int64 = 0
-                while let chunk = try handle.read(upToCount: 8 << 20), !chunk.isEmpty {
+                // Each read in a pool of its own. What is read comes back autoreleased, and nothing
+                // else drains a pool until the loop ends, so without it the whole file stays in
+                // memory and iOS ends the app (#54). The simulator sets no limit, so it shows only
+                // on a device.
+                while let chunk = try autoreleasepool(invoking: { try handle.read(upToCount: 8 << 20) }), !chunk.isEmpty {
                     hasher.update(data: chunk)
                     read += Int64(chunk.count)
                     if read - shown >= 512 << 20 {

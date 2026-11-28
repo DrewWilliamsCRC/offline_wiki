@@ -207,7 +207,10 @@ Things that span files:
     is then (never a listing kept from a moment before), checks it and renames it.
     iOS uses a background `URLSession`, which carries on with the app suspended and leaves resume
     data when stopped; a file that has arrived waits in Application Support/Downloads until it
-    is checked, then moves into Documents. Checking 53 GB takes a minute or more.
+    is checked, then moves into Documents. Checking 53 GB takes a minute or more. iOS gives
+    each read of the check an `autoreleasepool` of its own: without one the whole file stayed in
+    memory, and iOS ended the app at every launch (#54). The simulator sets no memory limit, so it
+    cannot show that, but `footprint <pid>` gives a simulator app's `phys_footprint_peak`.
   - **The index comes first**, the `.zim` last: an index alone is harmless, as both apps look
     for a `.zim`, so Wikipedia appears to the app only when it is complete.
   - **Wi-Fi only, and room checked first** (the space still needed plus 100 MB). One book at a
