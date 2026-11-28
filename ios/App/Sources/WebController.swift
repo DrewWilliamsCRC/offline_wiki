@@ -18,6 +18,15 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
     /// The article on screen, as filed in the reading history: nil while a page loads, and for the
     /// "Not found" page and the tiny pages that only forward to another article.
     @Published private(set) var article: Library.Article?
+    /// A footnote to show over the article, after a tap on its mark; nil when none is up.
+    @Published var note: Note?
+
+    /// A footnote's mark ("12") and its text, with the links in it.
+    struct Note: Identifiable {
+        let id: String // the note's element id in the page: cite_note-12
+        let mark: String
+        let text: AttributedString
+    }
 
     let webView: WKWebView
     private let library: Library
@@ -48,6 +57,21 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
         // The system's own find bar: "Find in Article" opens it.
         webView.isFindInteractionEnabled = true
         webView.uiDelegate = self // a long press on a link: see the extension at the end
+        // A tap on a footnote mark ([12]) shows the note in a sheet over the article rather than
+        // jumping to the list of references, so the reader stays where they were. It has to be
+        // stopped before it becomes a navigation: WebKit scrolls to a fragment in the same page
+        // even when the navigation delegate cancels it. Our own script, in a world of its own
+        // (articles' scripts do not run), catches the click and passes the note's id on.
+        let notes = WKUserScript(source: """
+            document.addEventListener('click', (event) => {
+                const link = event.target.closest && event.target.closest('a[href^="#cite_note"]');
+                if (!link) return;
+                event.preventDefault();
+                window.webkit.messageHandlers.note.postMessage(decodeURIComponent(link.getAttribute('href').slice(1)));
+            }, true);
+            """, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient)
+        webView.configuration.userContentController.addUserScript(notes)
+        webView.configuration.userContentController.add(NoteTaps(self), contentWorld: .defaultClient, name: "note")
         webView.scrollView.delegate = self
         // The title is watched rather than read when a page finishes: now and then the web view
         // says a page has finished a moment before it knows the page's title.
@@ -101,6 +125,66 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
     func setTextSize(_ percent: Int) {
         server.textSize = percent
         webView.evaluateJavaScript("document.documentElement.style.webkitTextSizeAdjust='\(percent)%'")
+    }
+
+    /// Follows a link from outside the page, such as one in a footnote's sheet: an article here, or
+    /// anything else in the system browser.
+    func follow(_ url: URL) {
+        if url.scheme == WikiAddress.scheme { webView.load(URLRequest(url: url)) } else { openExternally(url) }
+    }
+
+    /// Reads the footnote with element id `id` from the page and puts it up as `note`; if that
+    /// fails, jumps to it as before. The note's own text and links are taken, not its back-link (^)
+    /// or its styles.
+    fileprivate func showNote(_ id: String) {
+        let script = """
+            const item = document.getElementById(id);
+            if (!item) return null;
+            const mark = document.querySelector('a[href="#' + CSS.escape(id) + '"]');
+            const parts = [];
+            const walk = (node) => {
+                for (const child of node.childNodes) {
+                    if (child.nodeType === Node.TEXT_NODE) {
+                        parts.push([child.textContent, '']);
+                    } else if (child.nodeType === Node.ELEMENT_NODE) {
+                        if (['STYLE', 'LINK', 'SCRIPT'].includes(child.tagName) || child.classList.contains('mw-cite-backlink')) continue;
+                        if (child.tagName === 'A') parts.push([child.textContent, child.href]); else walk(child);
+                    }
+                }
+            };
+            walk(item.querySelector('.reference-text') || item);
+            return { mark: mark ? mark.textContent : '', parts: parts };
+            """
+        // The id is passed as an argument, so nothing in it can be read as script.
+        webView.callAsyncJavaScript(script, arguments: ["id": id], in: nil, in: .page) { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                guard case .success(let value) = result, let found = value as? [String: Any],
+                      let parts = found["parts"] as? [[String]], !parts.isEmpty else {
+                    if let here = self.webView.url, var jump = URLComponents(url: here, resolvingAgainstBaseURL: false) {
+                        jump.fragment = id
+                        if let target = jump.url { self.webView.load(URLRequest(url: target)) }
+                    }
+                    return
+                }
+                var text = AttributedString()
+                for part in parts where part.count == 2 {
+                    var piece = AttributedString(part[0].replacing(/\s+/, with: " "))
+                    if !part[1].isEmpty, let link = URL(string: part[1]) { piece.link = link }
+                    text += piece
+                }
+                let mark = (found["mark"] as? String ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+                self.note = Note(id: id, mark: mark, text: WebController.trimmed(text))
+            }
+        }
+    }
+
+    /// `text` without the spaces at its ends.
+    private static func trimmed(_ text: AttributedString) -> AttributedString {
+        var text = text
+        while let first = text.characters.first, first.isWhitespace { text.removeSubrange(text.startIndex..<text.index(afterCharacter: text.startIndex)) }
+        while let last = text.characters.last, last.isWhitespace { text.removeSubrange(text.index(beforeCharacter: text.endIndex)..<text.endIndex) }
+        return text
     }
 
     /// Scrolls to a section's heading, or to the top of the article for nil. This is a scroll, not
@@ -480,6 +564,20 @@ struct WebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView { controller.webView }
     func updateUIView(_ view: WKWebView, context: Context) {}
+}
+
+/// Passes taps on footnote marks from the page's script to the controller. A go-between, because
+/// the web view keeps its message handlers for as long as it lives, and the controller owns the
+/// web view.
+private final class NoteTaps: NSObject, WKScriptMessageHandler {
+    weak var controller: WebController?
+
+    init(_ controller: WebController) { self.controller = controller }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let id = message.body as? String, id.hasPrefix("cite_note") else { return }
+        Task { @MainActor in self.controller?.showNote(id) } // assumeIsolated would need iOS 17
+    }
 }
 
 // MARK: A long press on a link

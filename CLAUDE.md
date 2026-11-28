@@ -437,6 +437,13 @@ Things to know:
   recent ones. The search screen lists Saved above Recently read; a row of either is swiped away
   (`forget`, `removeSaved`), and Clear in Recently read's header asks, then empties it
   (`forgetAll`). The Android app has neither yet.
+- **A tap on a footnote mark** ([12], a link to `#cite_note-…`) shows the note in a sheet
+  (`NoteView`) instead of jumping to the references; its links open as in the article. The tap is
+  caught by a `WKUserScript` of ours in the `.defaultClient` content world, which calls
+  `preventDefault` and posts the note's id (`NoteTaps`): WebKit scrolls to a fragment in the same
+  page even when `decidePolicyFor` cancels the navigation (found in the iOS 26.2 simulator). The
+  note's text and links are read with `callAsyncJavaScript` from `.reference-text`, without its
+  back-link (^) or styles; if that fails, the page jumps as before. Android still jumps.
 - **A long press on a link** (`WebController`'s `WKUIDelegate` extension) previews the article
   it leads to: its title and opening paragraph (`ArticleServer.summary`: the first `<p>` with
   real text, footnote marks, styles and the ⓘ of sound files left out, a forwarding page followed
