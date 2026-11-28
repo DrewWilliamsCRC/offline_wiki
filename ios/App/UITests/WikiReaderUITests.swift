@@ -433,6 +433,25 @@ final class WikiReaderUITests: XCTestCase {
         shot("24-opened-from-outside")
     }
 
+    /// A long press on a link shows the article it leads to, with its opening paragraph, and what
+    /// can be done with it; Open goes there.
+    func testLongPressOnALinkPreviewsIt() throws {
+        _ = openArticle(typing: "photosyn", choosing: "Photosynthesis")
+        let link = app.webViews.firstMatch.links["algae"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 10), "no link to press")
+        link.press(forDuration: 1.2)
+        // The preview's texts are "other" elements inside the menu, not static texts.
+        let summary = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH 'Algae ('")).firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "no preview of the linked article's opening paragraph")
+        XCTAssertFalse(summary.label.contains("\u{24D8}"), "the preview keeps the marks of the pronunciation links")
+        for action in ["Open", "Save", "Share", "Copy Title"] {
+            XCTAssertTrue(app.buttons[action].exists, "the menu has no \(action)")
+        }
+        shot("25-link-preview")
+        app.buttons["Open"].tap()
+        XCTAssertTrue(app.navigationBars["Algae"].waitForExistence(timeout: 20), "Open did not open the linked article")
+    }
+
     /// Searches for `query`, opens the result titled `title`, and returns the article's heading.
     private func openArticle(typing query: String, choosing title: String) -> XCUIElement {
         let field = app.searchFields.firstMatch

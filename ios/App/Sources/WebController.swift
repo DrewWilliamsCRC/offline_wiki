@@ -47,6 +47,7 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
         webView.allowsBackForwardNavigationGestures = true
         // The system's own find bar: "Find in Article" opens it.
         webView.isFindInteractionEnabled = true
+        webView.uiDelegate = self // a long press on a link: see the extension at the end
         webView.scrollView.delegate = self
         // The title is watched rather than read when a page finishes: now and then the web view
         // says a page has finished a moment before it knows the page's title.
@@ -75,15 +76,17 @@ final class WebController: NSObject, ObservableObject, WKNavigationDelegate, UIS
     /// online: the path in the file is the title as Wikipedia spells it in its addresses, and the
     /// file's name says the language (`wikipedia_en_...`). Nil when there is no article, or the
     /// file's name says no language.
-    var onlineAddress: URL? {
-        guard let article else { return nil }
-        let parts = library.fileName.split(separator: "_")
-        guard parts.count >= 2, parts[0] == "wikipedia", parts[1].allSatisfy({ $0.isLetter || $0 == "-" }) else { return nil }
+    var onlineAddress: URL? { article.flatMap { onlineAddress(of: $0.path) } }
+
+    /// The article at `path` at its own address on wikipedia.org; nil if the file's name says no
+    /// language.
+    func onlineAddress(of path: String) -> URL? {
+        guard let language = library.language else { return nil }
         var address = URLComponents()
         address.scheme = "https"
-        address.host = "\(parts[1]).wikipedia.org"
+        address.host = "\(language).wikipedia.org"
         // The path is percent-encoded here, "?" and "#" included, which a title may hold.
-        address.percentEncodedPath = "/wiki/" + (article.path.addingPercentEncoding(withAllowedCharacters: WebController.pathCharacters) ?? article.path)
+        address.percentEncodedPath = "/wiki/" + (path.addingPercentEncoding(withAllowedCharacters: WebController.pathCharacters) ?? path)
         return address.url
     }
 
@@ -268,6 +271,50 @@ final class ArticleServer: NSObject {
         return remember(ArticleSections.parse(item.data), for: path)
     }
 
+    /// The opening paragraph of the article at `path`, as plain text, for a link's preview; nil if
+    /// there is none. One of the tiny pages that only forward to a section of another article is
+    /// followed, once. Footnote marks ([1]) and inline styles are left out; superscripts such as
+    /// the 2 of km² stay.
+    func summary(of path: String, forwarded: Bool = false) -> String? {
+        guard let item = try? library.item(path), item.mimeType.hasPrefix("text/html") else { return nil }
+        let html = String(decoding: item.data.prefix(512 * 1024), as: UTF8.self)
+        // content="0;URL='./A_Song_for_You#Herbie_Hancock_featuring_Christina_Aguilera'"
+        if !forwarded, item.data.count < 2048,
+           let match = html.firstMatch(of: /http-equiv="refresh"[^>]*?content="[^"]*?[Uu][Rr][Ll]='?(?:\.\/)?([^"'#]+)/) {
+            return summary(of: String(match.1).removingPercentEncoding ?? String(match.1), forwarded: true)
+        }
+        for match in html.matches(of: /<p\b[^>]*>(.*?)<\/p>/.dotMatchesNewlines()) {
+            let marked = String(match.1)
+                .replacing(/<style\b.*?<\/style>|<sup\b[^>]*class="[^"]*reference[^"]*"[^>]*>.*?<\/sup>/.dotMatchesNewlines(), with: "")
+                .replacing(/<[^>]+>/, with: "")
+            let text = ArticleServer.decodeEntities(marked)
+                .replacingOccurrences(of: "\u{24D8}", with: "") // ⓘ, the mark of a pronunciation's sound file
+                .replacing(/\s+/, with: " ")
+                .trimmingCharacters(in: .whitespaces)
+            // Empty paragraphs and stray coordinates come before the first real one.
+            guard text.count > 40 else { continue }
+            return text.count > 600 ? String(text.prefix(600)) + "…" : text
+        }
+        return nil
+    }
+
+    /// Decodes the character references HTML text may hold: numeric ones, and the few named ones
+    /// that turn up in articles. Others are left as they are.
+    static func decodeEntities(_ text: String) -> String {
+        guard text.contains("&") else { return text }
+        let named = ["amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": "\u{a0}",
+                     "ndash": "–", "mdash": "—", "minus": "−", "thinsp": "\u{2009}", "hairsp": "\u{200a}"]
+        return text.replacing(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/) { match in
+            let name = String(match.1)
+            if name.hasPrefix("#") {
+                let number = name.dropFirst().lowercased().hasPrefix("x")
+                    ? UInt32(name.dropFirst(2), radix: 16) : UInt32(name.dropFirst())
+                return number.flatMap(Unicode.Scalar.init).map { String(Character($0)) } ?? String(match.0)
+            }
+            return named[name] ?? String(match.0)
+        }
+    }
+
     @discardableResult
     private func remember(_ sections: [ArticleSections.Section], for path: String) -> [ArticleSections.Section] {
         lock.withLock {
@@ -427,4 +474,105 @@ struct WebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView { controller.webView }
     func updateUIView(_ view: WKWebView, context: Context) {}
+}
+
+// MARK: A long press on a link
+
+/// A long press on a link shows where it leads before the reader goes there: the article's title
+/// and opening paragraph, with Open, Save, Share and Copy Title. A link out of Wikipedia gets
+/// Open in Browser and Copy Link; a link within the page (a footnote, a section) gets nothing, as
+/// WebKit's own preview would try to load it from the web.
+extension WebController: WKUIDelegate {
+    func webView(_ webView: WKWebView, contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
+                 completionHandler: @escaping (UIContextMenuConfiguration?) -> Void) {
+        guard let url = elementInfo.linkURL else { return completionHandler(nil) }
+        guard url.scheme == WikiAddress.scheme else {
+            return completionHandler(UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+                UIMenu(children: [
+                    UIAction(title: "Open in Browser", image: UIImage(systemName: "safari")) { _ in self?.openExternally(url) },
+                    UIAction(title: "Copy Link", image: UIImage(systemName: "doc.on.doc")) { _ in UIPasteboard.general.url = url },
+                ])
+            })
+        }
+        let path = WikiAddress.path(of: url)
+        if let here = webView.url, WikiAddress.path(of: here) == path {
+            return completionHandler(UIContextMenuConfiguration(identifier: nil, previewProvider: nil, actionProvider: nil))
+        }
+        // Read off the main thread: a 1 MB article takes a moment to decompress.
+        let (library, server) = (self.library, self.server)
+        server.queue.async {
+            let article = library.article(at: path)
+            let summary = article.flatMap { server.summary(of: $0.path) }
+            Task { @MainActor [weak self] in
+                completionHandler(self?.linkMenu(url, path: path, article: article, summary: summary))
+            }
+        }
+    }
+
+    /// Tapping the preview opens the link, as tapping the link would have.
+    func webView(_ webView: WKWebView, contextMenuForElement elementInfo: WKContextMenuElementInfo,
+                 willCommitWithAnimator animator: UIContextMenuInteractionCommitAnimating) {
+        guard let url = elementInfo.linkURL, url.scheme == WikiAddress.scheme else { return }
+        animator.addCompletion { [weak self] in self?.webView.load(URLRequest(url: url)) }
+    }
+
+    private func linkMenu(_ url: URL, path: String, article: Library.Article?, summary: String?) -> UIContextMenuConfiguration {
+        let title = article?.title ?? path.replacingOccurrences(of: "_", with: " ")
+        let text = article == nil ? "This article is not in this copy of Wikipedia." : summary
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: {
+            let preview = UIHostingController(rootView: LinkPreview(title: title, summary: text))
+            preview.preferredContentSize = preview.sizeThatFits(in: CGSize(width: LinkPreview.width, height: 640))
+            return preview
+        }) { [weak self] _ in
+            guard let self, let article else { return nil }
+            var actions = [
+                UIAction(title: "Open", image: UIImage(systemName: "arrow.right.circle")) { [weak self] _ in
+                    self?.webView.load(URLRequest(url: url))
+                },
+            ]
+            if self.history.isSaved(article.path) {
+                actions.append(UIAction(title: "Remove from Saved", image: UIImage(systemName: "bookmark.slash")) { [weak self] _ in
+                    self?.history.removeSaved(path: article.path)
+                })
+            } else {
+                actions.append(UIAction(title: "Save", image: UIImage(systemName: "bookmark")) { [weak self] _ in
+                    self?.history.addSaved(article)
+                })
+            }
+            if let address = self.onlineAddress(of: article.path) {
+                actions.append(UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+                    self?.share(address)
+                })
+            }
+            actions.append(UIAction(title: "Copy Title", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.string = article.title
+            })
+            return UIMenu(children: actions)
+        }
+    }
+
+    /// The system's share sheet, over whatever is on screen.
+    private func share(_ address: URL) {
+        guard var top = webView.window?.rootViewController else { return }
+        while let presented = top.presentedViewController { top = presented }
+        let sheet = UIActivityViewController(activityItems: [address], applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = webView // an iPad shows it as a popover
+        top.present(sheet, animated: true)
+    }
+}
+
+/// What a long press on a link shows of the article it leads to.
+struct LinkPreview: View {
+    static let width: CGFloat = 360
+    let title: String
+    let summary: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.headline)
+            if let summary { Text(summary).font(.subheadline) }
+        }
+        .padding(16)
+        .frame(width: LinkPreview.width, alignment: .leading)
+    }
 }
