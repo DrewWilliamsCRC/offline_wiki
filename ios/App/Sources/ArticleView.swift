@@ -64,6 +64,12 @@ struct ArticleView: View {
                         .disabled(textSize >= ArticleView.sizes.last!)
                 }
             }
+            .sheet(item: $web.note) { note in
+                NoteView(note: note) { url in
+                    web.note = nil
+                    web.follow(url)
+                }
+            }
             .sheet(isPresented: $showingSections) {
                 SectionsView(sections: web.sections) { section in
                     showingSections = false
@@ -139,5 +145,33 @@ struct SectionsView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+/// A footnote, over the article, so the reader stays where they were. Its links open as links in
+/// the article do: an article here, anything else in the system browser.
+struct NoteView: View {
+    let note: WebController.Note
+    let open: (URL) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(note.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle(note.mark.isEmpty ? "Note" : "Note \(note.mark)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .environment(\.openURL, OpenURLAction { url in
+            open(url)
+            return .handled
+        })
+        .presentationDetents([.fraction(0.35), .large])
     }
 }

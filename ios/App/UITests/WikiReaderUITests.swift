@@ -460,6 +460,26 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Algae"].waitForExistence(timeout: 20), "Open did not open the linked article")
     }
 
+    /// A tap on a footnote mark shows the note over the article instead of jumping to the list of
+    /// references, so the reader stays where they were.
+    func testFootnoteShowsWhereItIsTapped() throws {
+        let heading = openArticle(typing: "photosyn", choosing: "Photosynthesis")
+        // [2] is in the opening paragraphs, on screen; the first [1] is in a note at the end, and
+        // tapping it would scroll the page there first.
+        let mark = app.webViews.firstMatch.links["[2]"].firstMatch
+        XCTAssertTrue(mark.waitForExistence(timeout: 10), "no footnote mark")
+        XCTAssertTrue(mark.isHittable && heading.isHittable, "the mark and the heading are not both on screen")
+        mark.tap()
+        XCTAssertTrue(app.navigationBars["Note 2"].waitForExistence(timeout: 10), "the note was not shown")
+        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Prokaryotic photosynthesis'")).firstMatch
+        XCTAssertTrue(text.exists, "the note's text is not shown")
+        XCTAssertFalse(text.label.hasPrefix("^"), "the note's back-link is shown")
+        shot("26-footnote")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(heading.waitForExistence(timeout: 10))
+        XCTAssertTrue(heading.isHittable, "the article jumped away from where the reader was")
+    }
+
     /// Searches for `query`, opens the result titled `title`, and returns the article's heading.
     private func openArticle(typing query: String, choosing title: String) -> XCUIElement {
         let field = app.searchFields.firstMatch
