@@ -270,6 +270,69 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertFalse(age.exists, "the age shows over search results")
     }
 
+    /// An article saved from its menu is listed under Saved and keeps its place there after
+    /// Recently read is cleared; a row of either list is removed by swiping it.
+    func testSaveClearAndRemove() throws {
+        _ = openArticle(typing: "photosyn", choosing: "Photosynthesis")
+        // Read on to a section well down the article.
+        let name = "Light-dependent reactions"
+        let heading = app.webViews.firstMatch.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
+        app.buttons["Sections"].tap()
+        XCTAssertTrue(app.buttons[name].waitForExistence(timeout: 10), "the menu does not list the section")
+        app.buttons[name].tap()
+        expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: heading)
+        waitForExpectations(timeout: 10)
+        sleep(2) // the place is noted a moment after the page stops moving
+
+        app.buttons["More"].tap()
+        XCTAssertTrue(app.buttons["Save"].waitForExistence(timeout: 10), "the menu has no Save")
+        app.buttons["Save"].tap()
+        app.buttons["More"].tap()
+        XCTAssertTrue(app.buttons["Remove from Saved"].waitForExistence(timeout: 10), "the menu does not say the article is saved")
+        app.buttons["Remove from Saved"].tap() // and saved again: the menu works both ways
+        app.buttons["More"].tap()
+        XCTAssertTrue(app.buttons["Save"].waitForExistence(timeout: 10), "Remove from Saved did not remove it")
+        app.buttons["Save"].tap()
+
+        // Back at the search screen with its field empty, both lists show it.
+        app.navigationBars.buttons.firstMatch.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.buttons["Clear text"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Saved"].waitForExistence(timeout: 10), "no Saved list")
+        XCTAssertTrue(app.staticTexts["Recently read"].exists)
+        shot("20-saved")
+
+        // Clearing Recently read asks first, and leaves the saved article with its place.
+        app.buttons["Clear"].tap()
+        XCTAssertTrue(app.buttons["Clear the List"].waitForExistence(timeout: 10), "clearing did not ask first")
+        app.buttons["Clear the List"].tap()
+        XCTAssertFalse(app.staticTexts["Recently read"].waitForExistence(timeout: 3), "Recently read was not cleared")
+        XCTAssertTrue(app.staticTexts["Saved"].exists, "clearing Recently read removed the saved article")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "% read")).firstMatch.exists,
+                      "the saved article lost how far it was read")
+        shot("21-cleared")
+        app.staticTexts["Photosynthesis"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: heading)
+        waitForExpectations(timeout: 20)
+
+        // Opened again, it is a recent one too. Swiping removes it from each list in turn.
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Recently read"].waitForExistence(timeout: 10))
+        func swipeAway() {
+            app.cells.containing(.staticText, identifier: "Photosynthesis").firstMatch.swipeLeft()
+            XCTAssertTrue(app.buttons["Remove"].waitForExistence(timeout: 10), "a row cannot be swiped away")
+            app.buttons["Remove"].tap()
+        }
+        swipeAway() // the first row is the saved one
+        XCTAssertFalse(app.staticTexts["Saved"].waitForExistence(timeout: 3), "the saved article was not removed")
+        XCTAssertTrue(app.staticTexts["Recently read"].exists, "removing a saved article emptied Recently read")
+        swipeAway()
+        XCTAssertFalse(app.staticTexts["Recently read"].waitForExistence(timeout: 3), "the recent article was not removed")
+        XCTAssertFalse(app.staticTexts["Photosynthesis"].exists)
+    }
+
     /// Searches for `query`, opens the result titled `title`, and returns the article's heading.
     private func openArticle(typing query: String, choosing title: String) -> XCUIElement {
         let field = app.searchFields.firstMatch

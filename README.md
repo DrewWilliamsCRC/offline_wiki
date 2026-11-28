@@ -237,8 +237,10 @@ and the same search results in the same order. The app has a search screen (resu
 recently read, a random article, and the month the copy of Wikipedia dates from) and an article
 view with back/forward, a menu of the article's sections, text size and a dark appearance. Its
 text starts at the size set for the whole device (Settings, Display & Brightness, Text Size), and
-A− / A+ adjust it from there. A menu at the top finds a word in the article, shares it, or opens
-it on wikipedia.org. Like the Android app, it opens where you left it. Wikipedia and its index are
+A− / A+ adjust it from there. A menu at the top saves the article to come back to, finds a word in
+it, shares it, or opens it on wikipedia.org. Saved articles are listed on the search screen above
+the recently read ones, and keep how far you read them. Swipe a row to remove it from either list;
+Clear empties Recently read. Like the Android app, it opens where you left it. Wikipedia and its index are
 kept out of iCloud and computer backups: they would use tens of gigabytes there, and can be
 downloaded again.
 

@@ -145,11 +145,14 @@ final class LibraryStore: ObservableObject {
 }
 
 /// The articles read most recently, newest first, with how far down each one the reader was, and
-/// whether an article was on screen when the app was last seen. Kept across launches, so the app
-/// can open where it was left.
+/// whether an article was on screen when the app was last seen; and the articles the reader saved
+/// to come back to. Kept across launches, so the app can open where it was left.
 @MainActor
 final class History: ObservableObject {
     @Published private(set) var articles: [Library.Article] = []
+    /// Saved by the reader, newest first. Unlike the recent ones they stay until removed, and so does
+    /// how far each was read, after the article has left the recent ones.
+    @Published private(set) var saved: [Library.Article] = []
     /// By path: 0 at an article's top, 1 at its end. Not published: it changes with every scroll.
     private var positions: [String: Double] = [:]
     private var saving: DispatchWorkItem?
@@ -158,13 +161,24 @@ final class History: ObservableObject {
     private static let readingKey = "reading"
     private static let limit = 40
 
+    /// The saved list, in a file of its own rather than with the settings: it has no limit.
+    private static var savedFile: URL {
+        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("saved.json")
+    }
+
     init() {
         if let data = UserDefaults.standard.data(forKey: History.key),
-           let saved = try? JSONDecoder().decode([Library.Article].self, from: data) {
-            articles = saved
+           let list = try? JSONDecoder().decode([Library.Article].self, from: data) {
+            articles = list
         }
-        if let saved = UserDefaults.standard.dictionary(forKey: History.positionsKey) as? [String: Double] {
-            positions = saved
+        if let data = try? Data(contentsOf: History.savedFile),
+           let list = try? JSONDecoder().decode([Library.Article].self, from: data) {
+            saved = list
+        }
+        if let kept = UserDefaults.standard.dictionary(forKey: History.positionsKey) as? [String: Double] {
+            positions = kept
         }
     }
 
@@ -173,14 +187,43 @@ final class History: ObservableObject {
         if let first = articles.first, first.path == path, first.title == title { return }
         let kept = articles.filter { $0.path != path }.prefix(History.limit - 1)
         articles = [Library.Article(title: title, path: path)] + kept
-        if let data = try? JSONEncoder().encode(articles) { UserDefaults.standard.set(data, forKey: History.key) }
+        storeRecent()
+    }
+
+    /// Takes an article off the recently read list, and forgets how far it was read unless it is saved.
+    func forget(path: String) {
+        articles.removeAll { $0.path == path }
+        storeRecent()
+        save()
+    }
+
+    /// Empties the recently read list. Saved articles keep their places.
+    func forgetAll() {
+        articles = []
+        storeRecent()
+        save()
+    }
+
+    func isSaved(_ path: String) -> Bool { saved.contains { $0.path == path } }
+
+    /// Puts an article at the top of the saved list.
+    func addSaved(_ article: Library.Article) {
+        saved = [Library.Article(title: article.title, path: article.path)] + saved.filter { $0.path != article.path }
+        storeSaved()
+    }
+
+    /// Takes an article off the saved list, and forgets how far it was read unless it is a recent one.
+    func removeSaved(path: String) {
+        saved.removeAll { $0.path == path }
+        storeSaved()
+        save()
     }
 
     func position(of path: String) -> Double { positions[path] ?? 0 }
 
-    /// Notes how far an article in the list has been read. Kept a moment later, or at `save`.
+    /// Notes how far an article in either list has been read. Kept a moment later, or at `save`.
     func setPosition(_ position: Double, of path: String) {
-        guard positions[path] != position, articles.contains(where: { $0.path == path }) else { return }
+        guard positions[path] != position, articles.contains(where: { $0.path == path }) || isSaved(path) else { return }
         positions[path] = position
         saving?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.save() }
@@ -188,12 +231,21 @@ final class History: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
     }
 
+    /// Keeps the reading places, of the articles in either list only.
     func save() {
         saving?.cancel()
         saving = nil
-        let listed = Set(articles.map(\.path))
+        let listed = Set(articles.map(\.path)).union(saved.map(\.path))
         positions = positions.filter { listed.contains($0.key) }
         UserDefaults.standard.set(positions, forKey: History.positionsKey)
+    }
+
+    private func storeRecent() {
+        if let data = try? JSONEncoder().encode(articles) { UserDefaults.standard.set(data, forKey: History.key) }
+    }
+
+    private func storeSaved() {
+        if let data = try? JSONEncoder().encode(saved) { try? data.write(to: History.savedFile, options: .atomic) }
     }
 
     /// Whether an article, rather than the search screen, was showing when the app was last seen.
