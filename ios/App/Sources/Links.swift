@@ -63,8 +63,12 @@ enum Link: Equatable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.lowercased().contains("wikipedia.org/") else { return nil }
         let full = trimmed.lowercased().hasPrefix("http") ? trimmed : "https://" + trimmed
-        let encoded = full.replacingOccurrences(of: " ", with: "_")
-        return URL(string: encoded).flatMap(page)
+        // Before iOS 17, URL(string:) refuses letters outside ASCII ("Zürich"), which an address
+        // copied from a page's text can hold. They are percent-encoded here; what is encoded
+        // already, and the marks an address is made of, are left as they are.
+        let allowed = CharacterSet.urlFragmentAllowed.union(CharacterSet(charactersIn: "%#"))
+        let spaced = full.replacingOccurrences(of: " ", with: "_")
+        return URL(string: spaced.addingPercentEncoding(withAllowedCharacters: allowed) ?? spaced).flatMap(page)
     }
 
     /// The name of a language for the reader ("French" for `fr`), or its code if there is none.

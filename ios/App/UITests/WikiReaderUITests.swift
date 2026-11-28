@@ -401,6 +401,12 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
         field.buttons["Clear text"].firstMatch.tap()
+        // Letters outside ASCII, as an address copied from a page's text can have them.
+        field.typeText("https://en.wikipedia.org/wiki/Zürich")
+        // English Wikipedia calls it Zurich; "Zürich" is another name for it.
+        XCTAssertTrue(app.staticTexts["Zurich"].waitForExistence(timeout: 10), "an address with an accented letter did not find its article")
+        XCTAssertTrue(app.staticTexts["also: Zürich"].exists)
+        field.buttons["Clear text"].firstMatch.tap()
         field.typeText("https://fr.wikipedia.org/wiki/Paris")
         let note = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'That address is for the French Wikipedia'")).firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 10), "an address in another language was not explained")
