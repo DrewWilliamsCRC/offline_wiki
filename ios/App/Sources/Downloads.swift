@@ -327,10 +327,12 @@ final class Downloads: NSObject, ObservableObject {
         }
     }
 
+    /// Called by iOS on the main thread just before the time runs out. The task must end before
+    /// this returns, or iOS ends the app; `tell` has handed iOS the notice by then.
     private func outOfTime() {
-        guard !checking.isEmpty else { return letGo() }
         // Not "ready": it is not, until its checksum has matched.
-        tell("Downloaded. Open Wiki Reader to finish checking it.", showDownloads: true) { self.letGo() }
+        if !checking.isEmpty { tell("Downloaded. Open Wiki Reader to finish checking it.", showDownloads: true) }
+        letGo()
     }
 
     private func letGo() {
@@ -351,21 +353,24 @@ final class Downloads: NSObject, ObservableObject {
     }
 
     /// Says how the download ended, in the downloads screen's words, unless the reader is looking
-    /// at the app. A newer notice replaces the one before. `then` runs once iOS has it.
-    private func tell(_ words: String, showDownloads: Bool, then: (() -> Void)? = nil) {
-        guard UIApplication.shared.applicationState != .active, let book else {
-            then?()
-            return
-        }
+    /// at the app. A newer notice replaces the one before.
+    ///
+    /// Out of sight the app may be suspended as soon as its background time ends, which the caller
+    /// often ends straight after this, and a notice still on its way would go with it. So this
+    /// waits for iOS to have it, for a second at most: only out of sight, where the main thread has
+    /// nothing on screen to keep up. `add` answers on a queue of its own; were it ever this one, the
+    /// wait would simply end after the second.
+    private func tell(_ words: String, showDownloads: Bool) {
+        guard UIApplication.shared.applicationState != .active, let book else { return }
         let content = UNMutableNotificationContent()
         content.title = book.title
         content.body = words
         content.sound = .default
         content.userInfo = [Downloads.showDownloadsKey: showDownloads]
         let request = UNNotificationRequest(identifier: Downloads.notice, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request) { _ in
-            DispatchQueue.main.async { then?() }
-        }
+        let handed = DispatchSemaphore(value: 0)
+        UNUserNotificationCenter.current().add(request) { _ in handed.signal() }
+        _ = handed.wait(timeout: .now() + 1)
     }
 
     private static func forgetNotice() {
