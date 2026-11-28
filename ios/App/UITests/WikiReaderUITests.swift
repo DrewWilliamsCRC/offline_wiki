@@ -270,6 +270,35 @@ final class WikiReaderUITests: XCTestCase {
         XCTAssertFalse(age.exists, "the age shows over search results")
     }
 
+    /// On a wide screen, an iPad's in landscape, an article's lines stop at a readable length
+    /// rather than running across the whole screen.
+    func testLinesStayReadableOnAWideScreen() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "only an iPad's screen is that wide")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        addTeardownBlock { XCUIDevice.shared.orientation = .portrait } // also after a failure, unlike defer
+        _ = openArticle(typing: "photosyn", choosing: "Photosynthesis")
+        shot("13-wide-screen")
+        // The widest piece of text outside tables, which may use the whole width: a paragraph's,
+        // or the licence line at the end. The page's text can take a moment to be listed.
+        let screen = app.windows.firstMatch.frame.width
+        var widest: CGFloat = 0
+        var text = ""
+        func walk(_ element: XCUIElementSnapshot) {
+            guard element.elementType != .table else { return }
+            if element.elementType == .staticText, element.frame.width > widest {
+                widest = element.frame.width
+                text = element.label
+            }
+            element.children.forEach(walk)
+        }
+        for _ in 0..<10 where widest < screen * 0.3 {
+            sleep(1)
+            walk(try app.webViews.firstMatch.snapshot())
+        }
+        XCTAssertGreaterThan(widest, screen * 0.3, "no paragraph found")
+        XCTAssertLessThan(widest, screen * 0.7, "\"\(text.prefix(80))\" runs \(Int(widest)) points across a screen of \(Int(screen))")
+    }
+
     /// An article saved from its menu is listed under Saved and keeps its place there after
     /// Recently read is cleared; a row of either list is removed by swiping it.
     func testSaveClearAndRemove() throws {
